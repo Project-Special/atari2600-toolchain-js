@@ -310,11 +310,218 @@ function testaCabecalho() {
   check('recusa arquivo que nao e .nes', !!erro, erro || '');
 }
 
+
+/* ==========================================================================
+   Caso 5: MMC3 -- bancos de CHR e o IRQ por scanline
+
+   A tabela de nomes fica com o mesmo tile 1 na tela inteira. O que muda e o
+   banco de CHR: em cima, o tile 1 e um bloco da cor 1; o IRQ do MMC3 dispara
+   na linha 120 e troca o banco, entao dali para baixo o mesmo tile 1 vira um
+   bloco da cor 2. E assim que os jogos partem a tela sem mexer na VRAM.
+   ========================================================================== */
+const MMC3 = `
+        processor 6502
+
+        seg header
+        org $0000
+        .byte "NES", $1A
+        .byte 2                 ; 2 x 16K de PRG = quatro bancos de 8K
+        .byte 1                 ; 1 x  8K de CHR = oito bancos de 1K
+        .byte $40               ; mapper 4 (MMC3), espelhamento horizontal
+        ds 9
+
+; O ultimo banco de 8K do MMC3 e fixo em $E000, e e onde todo o codigo mora.
+; Offset no arquivo: 16 + 32768 - 8192 = $6010.
+        seg prg
+        org $6010
+        rorg $E000
+
+Reset
+        sei
+        cld
+        ldx #$40
+        stx $4017
+        ldx #$FF
+        txs
+        inx
+        stx $2000
+        stx $2001
+
+.warm1  bit $2002
+        bpl .warm1
+.warm2  bit $2002
+        bpl .warm2
+
+        ; --- paleta ---
+        bit $2002
+        lda #$3F
+        sta $2006
+        lda #$00
+        sta $2006
+        ldx #0
+.pal    lda Palette,x
+        sta $2007
+        inx
+        cpx #8
+        bne .pal
+
+        ; --- a tela inteira com o tile 1 ---
+        bit $2002
+        lda #$20
+        sta $2006
+        lda #$00
+        sta $2006
+        lda #3
+        sta $12
+        ldy #1
+.big    ldx #0
+.b256   sty $2007
+        inx
+        bne .b256
+        dec $12
+        bne .big
+        ldx #192
+.b192   sty $2007
+        dex
+        bne .b192
+
+        ; --- atributos zerados ---
+        bit $2002
+        lda #$23
+        sta $2006
+        lda #$C0
+        sta $2006
+        lda #0
+        ldx #64
+.attr   sta $2007
+        dex
+        bne .attr
+
+        ; --- MMC3: R0 aponta para o primeiro conjunto de tiles ---
+        jsr SetBankA
+        lda #0
+        sta $A000               ; espelhamento
+
+        ; --- IRQ na linha 120 ---
+        jsr ArmIrq
+
+        bit $2002
+        lda #0
+        sta $2005
+        sta $2005
+        lda #$80
+        sta $2000               ; NMI ligado
+        lda #%00011110
+        sta $2001               ; desenho ligado
+        cli                     ; abre a porta do IRQ
+
+Loop    jmp Loop
+
+; R0 escolhe um banco de 2K para $0000; o valor e contado em bancos de 1K.
+SetBankA SUBROUTINE
+        lda #0
+        sta $8000               ; escolhe R0, modos zerados
+        lda #0
+        sta $8001               ; R0 = 0  -> tiles do primeiro conjunto
+        rts
+
+SetBankB SUBROUTINE
+        lda #0
+        sta $8000
+        lda #2
+        sta $8001               ; R0 = 2  -> tiles do segundo conjunto
+        rts
+
+ArmIrq SUBROUTINE
+        lda #119                ; conta 120 linhas desenhadas
+        sta $C000
+        sta $C001               ; recarrega o contador
+        sta $E001               ; liga o IRQ
+        rts
+
+; A cada quadro o topo volta ao primeiro conjunto e o contador e rearmado.
+Nmi SUBROUTINE
+        pha
+        txa
+        pha
+        jsr SetBankA
+        jsr ArmIrq
+        pla
+        tax
+        pla
+        rti
+
+; O IRQ da linha 120 troca o banco: dali para baixo, outro desenho.
+Irq SUBROUTINE
+        pha
+        txa
+        pha
+        lda #0
+        sta $E000               ; confirma e desliga
+        jsr SetBankB
+        pla
+        tax
+        pla
+        rti
+
+Palette
+        .byte $0F, $16, $2A, $12
+        .byte $0F, $01, $02, $03
+
+        org $8010 - 6
+        rorg $FFFA
+        .word Nmi, Reset, Irq
+
+; --- CHR: dois conjuntos de tiles no mesmo indice ---------------------------
+        seg chr
+        org $8010
+        ds 16                   ; tile 0 vazio
+        ds 8, $FF               ; tile 1 do conjunto A: plano 0 -> cor 1
+        ds 8, $00
+        org $8010 + 2048        ; banco de 1K numero 2
+        ds 16                   ; tile 0 vazio
+        ds 8, $00               ; tile 1 do conjunto B: plano 1 -> cor 2
+        ds 8, $FF
+        org $A010               ; completa os 8K
+`;
+
+function testaMmc3() {
+  const rom = build('mmc3.nes', MMC3);
+  check('o .nes do MMC3 tem 32K de PRG e 8K de CHR',
+        rom.length === 16 + 32768 + 8192, rom.length + ' bytes');
+
+  const nes = NES.create();
+  nes.load(rom);
+  const i0 = nes.info;
+  check('o cabecalho diz MMC3', i0.mapper === 4 && i0.mapperName === 'MMC3',
+        'mapper ' + i0.mapper + ' (' + i0.mapperName + ')');
+
+  let out;
+  for (let f = 0; f < 10; f++) out = nes.frame();
+  const px = (x, y) => out.pixels[y * NES.WIDTH + x];
+
+  check('a CPU rodou sem opcode desconhecido', nes.info.unknownOps.length === 0,
+        nes.info.unknownOps.join(',') || '');
+  check('em cima da divisao, o tile 1 e o conjunto A', px(100, 40) === cor(0x16),
+        '$' + px(100, 40).toString(16) + ' (esperado $' + cor(0x16).toString(16) + ')');
+  check('embaixo da divisao, o mesmo tile virou o conjunto B', px(100, 200) === cor(0x2a),
+        '$' + px(100, 200).toString(16) + ' (esperado $' + cor(0x2a).toString(16) + ')');
+
+  /* onde exatamente a tela virou */
+  let corte = -1;
+  for (let y = 1; y < 240; y++) {
+    if (px(100, y) !== px(100, y - 1)) { corte = y; break; }
+  }
+  check('a divisao caiu perto da linha 120', corte >= 112 && corte <= 128,
+        'virou na linha ' + corte);
+}
+
 /* -------------------------------------------------------------------------- */
 testaCabecalho();
 testaTela();
 testaRolagem();
 testaSprite0();
+testaMmc3();
 
 console.log(bad ? bad + ' caso(s) falhando' : 'emulador de NES ok');
 process.exit(bad ? 1 : 0);

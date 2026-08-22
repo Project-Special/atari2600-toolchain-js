@@ -18,6 +18,9 @@ const NES = (() => {
   'use strict';
 
   const WIDTH = 256, HEIGHT = 240;
+
+  /* os mappers que este nucleo entende */
+  const MAPPERS = { 0: 'NROM', 1: 'MMC1', 2: 'UxROM', 3: 'CNROM', 4: 'MMC3', 7: 'AxROM' };
   const DOTS_PER_LINE = 341;
   const LINES_PER_FRAME = 262;
 
@@ -50,12 +53,44 @@ const NES = (() => {
     let mirroring = 0;                 // 0 horizontal, 1 vertical, 2 e 3 = uma tela
     let prgBankCount = 1, chrBankCount = 1;
 
-    /* bancos correntes, em offsets de byte */
-    let prgBank0 = 0, prgBank1 = 0;    // duas janelas de 16K em $8000 e $C000
-    let chrBank0 = 0, chrBank1 = 0;    // duas janelas de 4K em $0000 e $1000
+    /* Todo mapper cai no mesmo par de mapas: quatro janelas de 8K para o PRG
+       e oito de 1K para a CHR, guardando o offset em bytes de cada uma. E o
+       menor denominador comum -- o MMC3 troca de 8K e 1K por vez, e os outros
+       so preenchem varias janelas com o mesmo banco. */
+    const prgMap = new Int32Array(4);
+    const chrMap = new Int32Array(8);
 
     /* MMC1 */
     let mmc1Shift = 0x10, mmc1Ctrl = 0x0c, mmc1Chr0 = 0, mmc1Chr1 = 0, mmc1Prg = 0;
+
+    /* MMC3 */
+    const mmc3R = new Int32Array(8);   // R0..R7
+    let mmc3Select = 0;                // o registrador escolhido, mais os dois modos
+    let mmc3IrqLatch = 0, mmc3IrqCounter = 0, mmc3IrqEnable = false, mmc3IrqReload = false;
+    let irqPending = false;
+
+    const prg8 = n => {                 // n-esimo banco de 8K, dando a volta
+      const total = Math.max(1, prg.length >> 13);
+      return (((n % total) + total) % total) * 0x2000;
+    };
+    const chr1 = n => {                 // n-esimo banco de 1K
+      const total = Math.max(1, chr.length >> 10);
+      return (((n % total) + total) % total) * 0x400;
+    };
+
+    function setPrg32(bank32) {
+      for (let k = 0; k < 4; k++) prgMap[k] = prg8(bank32 * 4 + k);
+    }
+    function setPrg16(win, bank16) {    // win 0 = $8000, 1 = $C000
+      prgMap[win * 2] = prg8(bank16 * 2);
+      prgMap[win * 2 + 1] = prg8(bank16 * 2 + 1);
+    }
+    function setChr8(bank8) {
+      for (let k = 0; k < 8; k++) chrMap[k] = chr1(bank8 * 8 + k);
+    }
+    function setChr4(win, bank4) {      // win 0 = $0000, 1 = $1000
+      for (let k = 0; k < 4; k++) chrMap[win * 4 + k] = chr1(bank4 * 4 + k);
+    }
 
     function load(bytes) {
       const d = new Uint8Array(bytes);
@@ -83,36 +118,35 @@ const NES = (() => {
       chrBankCount = chr8k || 1;
       prgRam = new Uint8Array(0x2000);
 
-      prgBank0 = 0;
-      prgBank1 = (prg16k - 1) * 0x4000;
-      chrBank0 = 0;
-      chrBank1 = 0x1000;
+      /* estado inicial de cada mapper */
       mmc1Shift = 0x10; mmc1Ctrl = 0x0c; mmc1Chr0 = 0; mmc1Chr1 = 0; mmc1Prg = 0;
+      mmc3R.fill(0); mmc3Select = 0;
+      mmc3IrqLatch = 0; mmc3IrqCounter = 0; mmc3IrqEnable = false; mmc3IrqReload = false;
+      irqPending = false;
+
+      setChr8(0);
+      if (mapper === 7) setPrg32(0);
+      else { setPrg16(0, 0); setPrg16(1, prg16k - 1); }   // o ultimo banco no fim
+      if (mapper === 4) applyMmc3();
       reset();
     }
 
     /* --- leitura e escrita do cartucho ------------------------------------ */
     function prgRead(a) {
-      if (a < 0xc000) return prg[(prgBank0 + (a - 0x8000)) % prg.length];
-      return prg[(prgBank1 + (a - 0xc000)) % prg.length];
+      return prg[prgMap[(a >> 13) & 3] + (a & 0x1fff)];
     }
 
     function prgWrite(a, v) {
       switch (mapper) {
         case 1: mmc1Write(a, v); break;
-        case 2:                                        // UxROM
-          prgBank0 = (v & 0x0f) % prgBankCount * 0x4000;
-          break;
-        case 3:                                        // CNROM
-          chrBank0 = ((v & 3) % chrBankCount) * 0x2000;
-          chrBank1 = chrBank0 + 0x1000;
-          break;
-        case 7:                                        // AxROM
-          prgBank0 = ((v & 7) % Math.max(1, prgBankCount >> 1)) * 0x8000;
-          prgBank1 = prgBank0 + 0x4000;
+        case 2: setPrg16(0, v & 0x0f); break;             // UxROM
+        case 3: setChr8(v & 3); break;                    // CNROM
+        case 4: mmc3Write(a, v); break;
+        case 7:                                           // AxROM
+          setPrg32(v & 7);
           mirroring = (v & 0x10) ? 3 : 2;
           break;
-        default: break;                                // NROM nao tem registrador
+        default: break;                                   // NROM nao tem registrador
       }
     }
 
@@ -136,36 +170,83 @@ const NES = (() => {
       mirroring = [3, 2, 1, 0][mmc1Ctrl & 3];
       const prgMode = (mmc1Ctrl >> 2) & 3;
       const bank = mmc1Prg & 0x0f;
-      if (prgMode === 0 || prgMode === 1) {              // 32K de uma vez
-        prgBank0 = ((bank & ~1) % prgBankCount) * 0x4000;
-        prgBank1 = prgBank0 + 0x4000;
-      } else if (prgMode === 2) {                        // primeiro banco fixo
-        prgBank0 = 0;
-        prgBank1 = (bank % prgBankCount) * 0x4000;
-      } else {                                           // ultimo banco fixo
-        prgBank0 = (bank % prgBankCount) * 0x4000;
-        prgBank1 = (prgBankCount - 1) * 0x4000;
-      }
-      const chrMode = (mmc1Ctrl >> 4) & 1;
-      const chrSize = chr.length;
-      if (chrMode) {
-        chrBank0 = (mmc1Chr0 * 0x1000) % chrSize;
-        chrBank1 = (mmc1Chr1 * 0x1000) % chrSize;
-      } else {
-        chrBank0 = ((mmc1Chr0 & ~1) * 0x1000) % chrSize;
-        chrBank1 = (chrBank0 + 0x1000) % chrSize;
+      if (prgMode === 0 || prgMode === 1) setPrg32(bank >> 1);
+      else if (prgMode === 2) { setPrg16(0, 0); setPrg16(1, bank); }
+      else { setPrg16(0, bank); setPrg16(1, prgBankCount - 1); }
+      if ((mmc1Ctrl >> 4) & 1) { setChr4(0, mmc1Chr0); setChr4(1, mmc1Chr1); }
+      else setChr8(mmc1Chr0 >> 1);
+    }
+
+    /* MMC3: bancos de 8K no PRG, de 2K e 1K na CHR, e um contador de linhas que
+       pede IRQ -- e com ele que os jogos partem a tela em duas. */
+    function mmc3Write(a, v) {
+      const odd = a & 1;
+      switch (a & 0xe000) {
+        case 0x8000:
+          if (odd) mmc3R[mmc3Select & 7] = v;
+          else mmc3Select = v;
+          applyMmc3();
+          break;
+        case 0xa000:
+          if (!odd) mirroring = (v & 1) ? 0 : 1;          // no MMC3, 0 e vertical
+          break;
+        case 0xc000:
+          if (odd) { mmc3IrqCounter = 0; mmc3IrqReload = true; }
+          else mmc3IrqLatch = v;
+          break;
+        case 0xe000:
+          mmc3IrqEnable = !!odd;
+          if (!odd) irqPending = false;                   // desligar tambem confirma
+          break;
+        default: break;
       }
     }
 
+    function applyMmc3() {
+      const last = (prg.length >> 13) - 1;
+      if (mmc3Select & 0x40) {                            // $8000 fixo no penultimo
+        prgMap[0] = prg8(last - 1);
+        prgMap[1] = prg8(mmc3R[7]);
+        prgMap[2] = prg8(mmc3R[6]);
+      } else {
+        prgMap[0] = prg8(mmc3R[6]);
+        prgMap[1] = prg8(mmc3R[7]);
+        prgMap[2] = prg8(last - 1);
+      }
+      prgMap[3] = prg8(last);                             // o ultimo e sempre fixo
+
+      /* R0 e R1 sao bancos de 2K; R2..R5 sao de 1K. O bit 7 troca as metades. */
+      const inv = (mmc3Select & 0x80) ? 4 : 0;
+      chrMap[inv ^ 0] = chr1(mmc3R[0] & ~1);
+      chrMap[inv ^ 1] = chr1((mmc3R[0] & ~1) + 1);
+      chrMap[inv ^ 2] = chr1(mmc3R[1] & ~1);
+      chrMap[inv ^ 3] = chr1((mmc3R[1] & ~1) + 1);
+      chrMap[inv ^ 4] = chr1(mmc3R[2]);
+      chrMap[inv ^ 5] = chr1(mmc3R[3]);
+      chrMap[inv ^ 6] = chr1(mmc3R[4]);
+      chrMap[inv ^ 7] = chr1(mmc3R[5]);
+    }
+
+    /* O contador do MMC3 anda quando a PPU passa a buscar padrao de sprite
+       depois de ter buscado padrao de fundo -- na pratica, uma vez por linha
+       desenhada. O ponto 260 e onde isso cai. */
+    function mmc3ClockIrq() {
+      if (mmc3IrqCounter === 0 || mmc3IrqReload) {
+        mmc3IrqCounter = mmc3IrqLatch;
+        mmc3IrqReload = false;
+      } else {
+        mmc3IrqCounter--;
+      }
+      if (mmc3IrqCounter === 0 && mmc3IrqEnable) irqPending = true;
+    }
+
     function chrRead(a) {
-      return a < 0x1000 ? chr[(chrBank0 + a) % chr.length]
-                        : chr[(chrBank1 + (a - 0x1000)) % chr.length];
+      return chr[chrMap[(a >> 10) & 7] + (a & 0x3ff)];
     }
 
     function chrWrite(a, v) {
       if (!chrIsRam) return;
-      if (a < 0x1000) chr[(chrBank0 + a) % chr.length] = v;
-      else chr[(chrBank1 + (a - 0x1000)) % chr.length] = v;
+      chr[chrMap[(a >> 10) & 7] + (a & 0x3ff)] = v;
     }
 
     /* =====================================================================
@@ -439,6 +520,9 @@ const NES = (() => {
 
       if (visible && dot >= 1 && dot <= 256) renderPixel(dot - 1, scanline);
 
+      /* o contador de linhas do MMC3 anda uma vez por linha desenhada */
+      if (mapper === 4 && dot === 260 && rendering() && (visible || pre)) mmc3ClockIrq();
+
       dot++;
       if (dot >= DOTS_PER_LINE) {
         dot = 0;
@@ -584,8 +668,20 @@ const NES = (() => {
       tick(); tick();
     }
 
+    /* o IRQ e mascaravel: so entra com a bandeira I desligada. Quem pede aqui e
+       o contador de linhas do MMC3. */
+    function irq() {
+      push((PC >> 8) & 0xff);
+      push(PC & 0xff);
+      push(packP() & ~0x10);
+      fI = 1;
+      PC = cpuRead(0xfffe) | (cpuRead(0xffff) << 8);
+      tick(); tick();
+    }
+
     function step() {
       if (nmiPending) { nmiPending = false; nmi(); return; }
+      if (irqPending && !fI) { irq(); return; }
       if (dmaStall > 0) { dmaStall--; tick(); return; }
       const op = rd(PC++);
       let a, m;
@@ -806,7 +902,8 @@ const NES = (() => {
       pixels,
       get info() {
         return {
-          mapper, prgBankCount, chrBankCount, chrIsRam,
+          mapper, mapperName: MAPPERS[mapper] || ('mapper ' + mapper),
+          prgBankCount, chrBankCount, chrIsRam,
           mirroring: ['horizontal', 'vertical', 'uma tela A', 'uma tela B'][mirroring],
           scanline, dot, cycles, frame, pc: PC,
           unknownOps: Object.keys(unknownOps).map(k => '$' + (+k).toString(16)),

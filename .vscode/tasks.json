@@ -1,0 +1,38 @@
+{
+    // ${file} é o arquivo aberto no editor, com caminho absoluto — funciona
+    // também para fontes fora deste repositório, como os de Roms_meus.
+    // Quem compila é o montador em JS do tools/, pelo Node.
+    "version": "2.0.0",
+    "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+    },
+    "problemMatcher": {
+        "owner": "dasm",
+        "fileLocation": "absolute",
+        "pattern": {
+            "regexp": "^\\s*(.+?)\\s+\\((\\d+)\\):\\s+(error|warning):\\s+(.*)$",
+            "file": 1,
+            "line": 2,
+            "severity": 3,
+            "message": 4
+        }
+    },
+    "tasks": [
+        {
+            "label": "Compilar arquivo aberto",
+            "type": "process",
+            "command": "node",
+            "args": ["${workspaceFolder}/tools/build.js", "${file}"],
+            "group": { "kind": "build", "isDefault": true }
+        },
+        {
+            "label": "Compilar todos os fontes do repo",
+            "type": "process",
+            "command": "node",
+            "args": ["${workspaceFolder}/tools/build.js", "--all"],
+            "group": "build"
+        }
+    ]
+}

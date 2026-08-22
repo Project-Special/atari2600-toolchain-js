@@ -1,0 +1,12 @@
+{
+    // Atari Dev Studio: use the toolchain in C:/tools instead of the versions
+    // bundled with the extension (dasm 2.20.17 crashes on macro.h's SLEEP).
+    // Para rodar a ROM, o emulador é o do proprio editor de sprites.
+    "atari-dev-studio.compiler.dasm.path": "C:/tools/dasm/dasm.exe",
+    "atari-dev-studio.compiler.dasm.format": "3",
+    "files.associations": {
+        "*.asm": "dasm",
+        "vcs.h": "dasm",
+        "macro.h": "dasm"
+    }
+}

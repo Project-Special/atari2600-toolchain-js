@@ -1,0 +1,27 @@
+build/
+__pycache__/
+*.lst
+*.sym
+
+# A coleção de ROMs comerciais fica de fora: são 33 MB de jogos de terceiros,
+# que não são nossos para redistribuir.
+ROMs/
+
+# ROMs compiladas são geradas por `node tools/build.js`
+*.bin
+
+# Fontes de terceiros ficam so na maquina, fora do repositorio: os
+# disassemblies de jogos comerciais (Adventure, Combat, Pitfall!, River Raid,
+# Red vs Blue) e os exemplos de outros autores. Os exemplos que acompanham o
+# repositorio -- barras, nave e dialeto -- sao originais e de dominio publico.
+Arq_asm/adventure.asm
+Arq_asm/combat.asm
+Arq_asm/pitfall.asm
+Arq_asm/riverraid.asm
+Arq_asm/redblue.asm
+Arq_asm/pong.asm
+Arq_asm/hello.asm
+genemedic.asm
+
+# versoes antigas dos headers, guardadas so localmente
+*.orig

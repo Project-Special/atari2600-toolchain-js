@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editores de 8 bits</title>
+<!-- O icone: a tela dividida entre os dois consoles -- o azul da TIA de um
+     lado, o cinza-e-vermelho do NES do outro. Grade de 8 para dividir certo
+     em 16, 32 e 64. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 8 8%22 shape-rendering=%22crispEdges%22%3E%3Crect width=%228%22 height=%228%22 rx=%221%22 fill=%22%230d1319%22/%3E%3Crect x=%221%22 y=%222%22 width=%222%22 height=%224%22 fill=%22%23183b9d%22/%3E%3Crect x=%223%22 y=%222%22 width=%221%22 height=%224%22 fill=%22%23ececec%22/%3E%3Crect x=%225%22 y=%222%22 width=%222%22 height=%224%22 fill=%22%23f83800%22/%3E%3C/svg%3E">
+
+<style>
+/* ---------------------------------------------------------------------------
+   A casca e so uma barra e uma moldura. Cada editor continua sendo uma pagina
+   inteira por conta propria -- aqui eles nao se misturam, o que evita que um
+   pise no outro (os dois definem $, say, toast...).
+--------------------------------------------------------------------------- */
+:root {
+  --ground: #0d1319;
+  --panel:  #141c24;
+  --edge:   #24303c;
+  --ink:    #dfe7ef;
+  --dim:    #8a97a6;
+  --atari:  #4aa3ff;
+  --nes:    #f8785a;
+  --mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --sans: 'Archivo', 'Segoe UI', system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font: 14px/1.5 var(--sans);
+  display: flex; flex-direction: column;
+}
+
+.bar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 14px; background: var(--panel);
+  border-bottom: 1px solid var(--edge); flex: none;
+}
+.bar h1 {
+  margin: 0; font-size: 14px; font-weight: 700; letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.spacer { flex: 1; }
+.sub { color: var(--dim); font-size: 12px; font-family: var(--mono); }
+.sub a { color: var(--dim); }
+
+/* o seletor de console */
+.pick { display: flex; gap: 2px; background: #1b2530; border: 1px solid var(--edge);
+        border-radius: 8px; padding: 2px; }
+.pick button {
+  font: 600 13px var(--sans); color: var(--dim); background: transparent;
+  border: 0; border-radius: 6px; padding: 5px 14px; cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+}
+.pick button:hover { color: var(--ink); }
+.pick button.on { background: #24303c; color: var(--ink); }
+.pick i { width: 9px; height: 9px; border-radius: 2px; display: block; }
+.pick .atari i { background: var(--atari); }
+.pick .nes i { background: var(--nes); }
+
+iframe { flex: 1; width: 100%; border: 0; display: block; background: var(--ground); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Editores de 8 bits</h1>
+
+  <div class="pick" id="pick">
+    <button class="atari on" data-alvo="atari"><i></i>Atari 2600</button>
+    <button class="nes" data-alvo="nes"><i></i>NES</button>
+  </div>
+
+  <span class="sub" id="oque"></span>
+  <span class="spacer"></span>
+  <span class="sub"><a href="https://github.com/Project-Special/atari2600-toolchain-js">código no GitHub</a></span>
+</div>
+
+<iframe id="app" title="editor" allow="fullscreen" allowfullscreen></iframe>
+
+<script>
+'use strict';
+
+/* Cada console e uma pagina inteira, carregada na moldura. Sao da mesma
+   origem, entao o editor la dentro continua com acesso a arquivo -- gravar
+   por cima do .asm com Ctrl+S seguer funcionando. */
+const CONSOLES = {
+  atari: {
+    url: 'tools/sprite-editor.html',
+    diz: 'sprites de player, montador do DASM e emulador de 2600',
+  },
+  nes: {
+    url: 'tools/nes-editor.html',
+    diz: 'tiles da CHR de um .nes, e o jogo rodando com o que voce mudou',
+  },
+};
+
+const app = document.getElementById('app');
+const pick = document.getElementById('pick');
+const oque = document.getElementById('oque');
+
+function escolher(alvo, guardar) {
+  const c = CONSOLES[alvo] || CONSOLES.atari;
+  if (app.dataset.alvo !== alvo) {
+    app.src = c.url;
+    app.dataset.alvo = alvo;
+  }
+  oque.textContent = c.diz;
+  for (const b of pick.children) b.classList.toggle('on', b.dataset.alvo === alvo);
+  document.title = (alvo === 'nes' ? 'NES' : 'Atari 2600') + ' — Editores de 8 bits';
+  if (location.hash.slice(1) !== alvo) history.replaceState(null, '', '#' + alvo);
+  if (guardar) { try { localStorage.setItem('console', alvo); } catch (e) { /* modo privado */ } }
+  /* o teclado tem que ir para o editor, senao as setas rolam a pagina de fora */
+  setTimeout(() => app.focus(), 60);
+}
+
+pick.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (b) escolher(b.dataset.alvo, true);
+});
+
+addEventListener('hashchange', () => escolher(location.hash.slice(1), true));
+
+/* na chegada: o que veio no endereco, senao o ultimo que voce usou */
+let inicial = location.hash.slice(1);
+if (!CONSOLES[inicial]) {
+  try { inicial = localStorage.getItem('console'); } catch (e) { inicial = null; }
+}
+escolher(CONSOLES[inicial] ? inicial : 'atari', false);
+</script>
+</body>
+</html>

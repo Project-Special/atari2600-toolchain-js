@@ -1,8 +1,13 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Editor Emulador Atari</title>
 <!-- O icone da aba: a nave do Arq_asm/nave.asm, oito por oito pixels, em
      branco sobre o azul da TIA. A grade de 8 divide certo em 16, 32 e 64,
      entao o desenho sai com pixel inteiro em qualquer tamanho de aba. -->
-<link rel="icon" href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 8 8%22 shape-rendering=%22crispEdges%22><rect width=%228%22 height=%228%22 rx=%221%22 fill=%22%23183b9d%22/><g fill=%22%23ececec%22><rect x=%223%22 y=%221%22 width=%222%22 height=%222%22/><rect x=%222%22 y=%223%22 width=%224%22 height=%221%22/><rect x=%221%22 y=%224%22 width=%221%22 height=%221%22/><rect x=%223%22 y=%224%22 width=%222%22 height=%221%22/><rect x=%226%22 y=%224%22 width=%221%22 height=%221%22/><rect x=%220%22 y=%225%22 width=%228%22 height=%221%22/><rect x=%221%22 y=%226%22 width=%226%22 height=%221%22/><rect x=%222%22 y=%227%22 width=%224%22 height=%221%22/></g></svg>'>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 8 8%22 shape-rendering=%22crispEdges%22%3E%3Crect width=%228%22 height=%228%22 rx=%221%22 fill=%22%23183b9d%22/%3E%3Cg fill=%22%23ececec%22%3E%3Crect x=%223%22 y=%221%22 width=%222%22 height=%222%22/%3E%3Crect x=%222%22 y=%223%22 width=%224%22 height=%221%22/%3E%3Crect x=%221%22 y=%224%22 width=%221%22 height=%221%22/%3E%3Crect x=%223%22 y=%224%22 width=%222%22 height=%221%22/%3E%3Crect x=%226%22 y=%224%22 width=%221%22 height=%221%22/%3E%3Crect x=%220%22 y=%225%22 width=%228%22 height=%221%22/%3E%3Crect x=%221%22 y=%226%22 width=%226%22 height=%221%22/%3E%3Crect x=%222%22 y=%227%22 width=%224%22 height=%221%22/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -1161,6 +1166,8 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
 }
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
+</head>
+<body>
 
 <header class="bar">
   <h1>Editor Emulador Atari</h1>
@@ -1652,7 +1659,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 11:00';
+const APP_BUILD = '2026-08-22 12:02';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2579,7 +2586,18 @@ function syncFile() {
    renames itself to whatever this browser can actually do.
    ========================================================================== */
 
-const IN_FRAME = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+/* So conta como enquadrada a moldura de OUTRA origem -- e la que a API de
+   arquivos do navegador nao funciona. A casca deste projeto (o index.html) e
+   da mesma origem, entao dentro dela o Ctrl+S continua gravando por cima do
+   .asm em vez de cair no download. */
+const IN_FRAME = (() => {
+  try {
+    if (window.self === window.top) return false;
+    return window.top.location.origin !== window.location.origin;
+  } catch (e) {
+    return true;                    // acesso negado = origem diferente
+  }
+})();
 const CAN_FS = typeof window.showSaveFilePicker === 'function' && !IN_FRAME;
 const CAN_DOWNLOAD = !IN_FRAME;
 
@@ -6522,3 +6540,5 @@ $('#aboutBuild').textContent = APP_BUILD;
 $('#sver').textContent = 'v' + APP_BUILD.replace(/[^0-9]/g, '').slice(0, 12);
 say('Pronto. Arquivo ▸ Abrir .asm para editar os sprites de um fonte.');
 </script>
+</body>
+</html>

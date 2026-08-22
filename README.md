@@ -4,11 +4,19 @@ Montador, emuladores e editores para **Atari 2600** e **NES** — tudo em
 JavaScript, sem nada instalado, cada editor numa página que abre direto no
 navegador. Nenhuma chamada de rede, nenhum servidor, nenhum executável.
 
+Uma porta só: o **[index.html](index.html)** tem o seletor de console no topo e
+carrega o editor escolhido. Ele lembra o último que você usou, e o endereço
+aceita `#atari` ou `#nes` para abrir direto num deles.
+
 - **[Editor Emulador Atari](tools/sprite-editor.html)** — lê o `.asm`, mostra
   cada tabela `.byte` como sprite, monta o fonte e roda a ROM ali mesmo.
 - **[Editor Emulador NES](tools/nes-editor.html)** — abre um `.nes`, lista os
   tiles da CHR, deixa desenhar por cima, grava o arquivo de volta e roda o jogo
   com o que você mudou.
+
+Cada um continua sendo uma página inteira por conta própria: a casca só troca a
+moldura. É de propósito — os dois definem `$`, `say`, `toast` e afins, e juntos
+no mesmo escopo um pisaria no outro.
 
 ![o editor](https://img.shields.io/badge/roda%20em-um%20arquivo%20HTML-blue)
 
@@ -16,6 +24,7 @@ navegador. Nenhuma chamada de rede, nenhum servidor, nenhum executável.
 
 | Ferramenta | Arquivo | O que faz |
 |---|---|---|
+| Casca com os dois | `index.html` | escolhe o console e carrega o editor |
 | Editor de sprites | `tools/sprite-editor.html` | página única: desenho, código-fonte, montador e emulador |
 | Montador | `tools/dasm.js` | monta 6502 falando o dialeto do DASM, no navegador ou no Node |
 | Emulador | `tools/vcs.js` | núcleo próprio: CPU 6507, TIA e RIOT em lockstep com o color clock |

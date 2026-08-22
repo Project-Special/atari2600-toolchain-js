@@ -1409,6 +1409,10 @@ const NES = (() => {
       /* para o editor de tiles: a CHR crua e os dois planos de um tile */
       get chr() { return chr; },
       get chrIsRam() { return chrIsRam; },
+      /* As 32 entradas de $3F00: quatro paletas de fundo e quatro de sprite, do
+         jeito que o jogo as deixou. O editor usa isto para a previa dos tiles
+         mostrar a cor de verdade, e nao um palpite. */
+      get palette() { return palRam.slice(); },
       get audioRate() { return AUDIO_RATE; },
       WIDTH, HEIGHT, MASTER,
     };

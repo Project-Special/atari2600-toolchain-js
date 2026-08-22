@@ -1749,7 +1749,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 18:27';
+const APP_BUILD = '2026-08-22 18:36';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6950,10 +6950,17 @@ details.hint[open] { margin-bottom: 4px; }
     <div class="swatches" id="swatches"></div>
     <div class="info" id="tileInfo">nenhum tile aberto</div>
     <h2 style="margin-top:16px">Paleta de prévia</h2>
+    <div class="cdbar">
+      <label>usar</label>
+      <select id="palQual"></select>
+      <button id="palPegar" title="Relê as paletas do jogo que está rodando">Reler do jogo</button>
+    </div>
     <div class="pal" id="palette"></div>
-    <p class="hint">O NES guarda só o índice de 0 a 3 no tile; a cor vem da paleta
-    que o jogo escolhe em tempo de execução. Aqui você escolhe quatro cores das 64
-    do 2C02 só para enxergar o desenho.</p>
+    <p class="hint">O NES guarda só o índice de 0 a 3 no tile — <b>cor o tile não
+    tem</b>. Ela vem da paleta que o jogo carrega enquanto roda, e é por isso que
+    o desenho pode sair com outras cores no emulador. Por isso a lista acima traz
+    as oito paletas que <i>este</i> jogo usa, lidas dele: escolha a mesma que o
+    jogo aplica neste tile e a prévia passa a bater com o que você vê rodando.</p>
   </section>
 
   <section id="secCode" hidden>
@@ -10623,6 +10630,10 @@ const NES = (() => {
       /* para o editor de tiles: a CHR crua e os dois planos de um tile */
       get chr() { return chr; },
       get chrIsRam() { return chrIsRam; },
+      /* As 32 entradas de $3F00: quatro paletas de fundo e quatro de sprite, do
+         jeito que o jogo as deixou. O editor usa isto para a previa dos tiles
+         mostrar a cor de verdade, e nao um palpite. */
+      get palette() { return palRam.slice(); },
       get audioRate() { return AUDIO_RATE; },
       WIDTH, HEIGHT, MASTER,
     };
@@ -10663,10 +10674,11 @@ let chrRam = null;       // Uint8Array(8192): o que o jogo montou
    Por isso a procura e por plano, nao por tile inteiro. */
 let ramLo = null, ramHi = null;   // offset de cada plano no arquivo, ou -1
 let ramNota = null;                 // 0 = palpite solto, 2+ = evidencia forte
+let palJogo = null;                 // as 32 entradas de $3F00, lidas do jogo
 let bank = 0;            // banco de 8K sendo mostrado
 let tile = -1;           // tile selecionado, absoluto dentro da CHR
 let ink = 1;             // cor 0..3 do pincel
-let pal = [0x0f, 0x16, 0x27, 0x30];   // as quatro cores de prévia
+let pal = [0x0f, 0x16, 0x27, 0x30];   // as quatro cores de prévia, ate a ROM abrir
 const dirty = new Set(); // tiles alterados
 const undo = [];         // { tile, bytes } para o Ctrl+Z
 
@@ -10816,6 +10828,18 @@ function openRom(bytes, name) {
   if (!h.emulable && h.chrLen) {
     say(name + ' aberta para editar os tiles; ' + h.emulationNote + '.', true);
   }
+  /* Pega as paletas do proprio jogo e ja usa a de sprite 0. Antes a previa
+     nascia com quatro cores escolhidas por mim, sem relacao nenhuma com a ROM
+     aberta -- quem pintasse por elas via outra cor no emulador. */
+  palJogo = h.emulable ? lerPaletaDoJogo() : null;
+  montarSeletorDePaleta();
+  if (palJogo) {
+    $('#palQual').value = '4';
+    pal = coresDaPaleta(4);
+  }
+  buildSwatches();
+  buildPalette();
+
   drawGallery();
   drawGrid();
   updateDirty();
@@ -11148,6 +11172,74 @@ function buildSwatches() {
     box.appendChild(d);
   }
 }
+
+/* --- a paleta que o jogo usa de verdade ---------------------------------------
+
+   O tile nao guarda cor: guarda um indice de 0 a 3. Quem diz que cor e cada
+   indice e a paleta que o jogo carrega na PPU enquanto roda -- e ela muda de
+   tela para tela, e de sprite para sprite pelo byte de atributo.
+
+   Entao a previa so pode acertar se perguntar ao jogo. E o que estas rotinas
+   fazem: rodam a ROM alguns quadros (ou olham a que ja esta rodando) e leem as
+   32 entradas de $3F00. Sem isso a previa e um chute bonito, e o desenho sai
+   com outra cor no emulador -- que era exatamente o que acontecia.
+------------------------------------------------------------------------------ */
+function lerPaletaDoJogo() {
+  if (nes && running) return nes.palette;         // a de agora, na tela de agora
+  try {
+    const t = NES.create();
+    t.load(rom);
+    for (let f = 0; f < 60; f++) t.frame();
+    return t.palette;
+  } catch (err) {
+    return null;                                  // ROM que nao roda aqui
+  }
+}
+
+const NOME_PALETA = ['fundo 0', 'fundo 1', 'fundo 2', 'fundo 3',
+                     'sprite 0', 'sprite 1', 'sprite 2', 'sprite 3'];
+
+/* as quatro cores de uma das oito paletas; a entrada 0 e sempre o fundo comum */
+function coresDaPaleta(p) {
+  return [palJogo[0], palJogo[p * 4 + 1], palJogo[p * 4 + 2], palJogo[p * 4 + 3]];
+}
+
+function montarSeletorDePaleta() {
+  const sel = $('#palQual');
+  sel.textContent = '';
+  const livre = document.createElement('option');
+  livre.value = 'livre';
+  livre.textContent = 'cores livres';
+  sel.appendChild(livre);
+  if (!palJogo) { sel.value = 'livre'; sel.disabled = true; return; }
+  sel.disabled = false;
+  for (let p = 0; p < 8; p++) {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = NOME_PALETA[p] + ': ' +
+      coresDaPaleta(p).map(c => '$' + c.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+    sel.appendChild(o);
+  }
+}
+
+function usarPaleta(qual) {
+  if (qual === 'livre' || !palJogo) return;
+  pal = coresDaPaleta(+qual);
+  buildSwatches(); buildPalette(); drawGrid(); drawGallery();
+}
+
+$('#palQual').addEventListener('change', e => usarPaleta(e.target.value));
+
+$('#palPegar').addEventListener('click', () => {
+  if (!rom) return;
+  palJogo = lerPaletaDoJogo();
+  if (!palJogo) { say('não consegui rodar esta ROM para ler as paletas dela', true); return; }
+  montarSeletorDePaleta();
+  const qual = $('#palQual').value;
+  usarPaleta(qual === 'livre' ? '4' : qual);
+  if (qual === 'livre') $('#palQual').value = '4';
+  say('paletas relidas do jogo' + (nes && running ? ' que está rodando agora' : ''));
+});
 
 function buildPalette() {
   const box = $('#palette');

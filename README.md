@@ -84,14 +84,20 @@ registrador `v` nos pontos canônicos — coarse X a cada 8, Y no 256, cópia
 horizontal no 257, vertical entre 280 e 304 da linha de pré-render, vblank no
 ponto 1 da linha 241 e o ponto pulado no quadro ímpar. Sprites com avaliação de
 até oito por linha, 8x8 e 8x16, espelhamento, prioridade e o acerto do sprite
-0, que é como quase todo jogo divide a tela. Mappers 0 (NROM), 1 (MMC1),
-2 (UxROM), 3 (CNROM) e 7 (AxROM). **Sem som**: os registradores da APU são
-aceitos e ignorados.
+0, que é como quase todo jogo divide a tela.
+
+Os mappers vão todos pelo mesmo par de mapas — quatro janelas de 8K no PRG e
+oito de 1K na CHR, que é o menor denominador comum entre eles: 0 (NROM),
+1 (MMC1), 2 (UxROM), 3 (CNROM), 4 (MMC3) e 7 (AxROM). O MMC3 traz o contador
+de linhas que pede IRQ, que é como SMB3, Mega Man 3–6 e Kirby partem a tela.
+**Sem som**: os registradores da APU são aceitos e ignorados.
 
 `tools/nes-test.js` monta uma ROM `.nes` com o montador daqui — cabeçalho iNES,
 16K de PRG com `RORG` para `$C000`, 8K de CHR — e confere na tela as faixas de
 cor do fundo, o sprite 0 no lugar certo, a rolagem vertical e o acerto do
-sprite 0.
+sprite 0. Um caso à parte cobre o MMC3: a tela inteira com o mesmo tile, e o
+IRQ trocando o banco de CHR na linha 120 — em cima sai uma cor, embaixo outra,
+sem tocar na VRAM.
 
 **Editando os gráficos:** o `.nes` guarda cada tile de 8x8 em 16 bytes, dois
 planos de bits — os oito primeiros dão o bit 0 da cor de cada pixel, os oito

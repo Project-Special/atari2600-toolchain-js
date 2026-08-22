@@ -11,7 +11,7 @@
    bater. As regioes sao delimitadas por marcas no proprio index.html.
 
    Repoe tambem o exemplo que a aba Fonte carrega: e sempre o ultimo da serie
-   Arq_asm/nes-nave-N.asm, para o botao nunca trazer uma versao anterior.
+   Arq_nave/nes-nave-N.asm, para o botao nunca trazer uma versao anterior.
 
        node tools/embutir.js            repoe o que estiver velho
        node tools/embutir.js --conferir so diz o que esta velho, sem gravar
@@ -66,7 +66,7 @@ function acharRegiao(texto, nome, alvo, novo) {
 
 /* o ultimo da serie nes-nave-N.asm, que e o que a aba Fonte oferece */
 function exemploMaisNovo() {
-  const dir = path.join(AQUI, '..', 'Arq_asm');
+  const dir = path.join(AQUI, '..', 'Arq_nave');
   let nomes = [];
   try { nomes = fs.readdirSync(dir); } catch (err) { return null; }
   const serie = nomes.filter(n => /^nes-nave-\d+\.asm$/i.test(n))
@@ -78,7 +78,7 @@ function exemploMaisNovo() {
 
 function reporExemplo(plano, soConferir) {
   const ex = exemploMaisNovo();
-  if (!ex) { console.log('FALTA  nenhum Arq_asm/nes-nave-N.asm'); return { plano, mexeu: 0 }; }
+  if (!ex) { console.log('FALTA  nenhum Arq_nave/nes-nave-N.asm'); return { plano, mexeu: 0 }; }
   const marca = /(<script type="text\/plain" id="exemploAsm">\n)([\s\S]*?)(<\/script>)/;
   const m = marca.exec(plano);
   if (!m) { console.log('FALTA  o <script id="exemploAsm"> não está no index.html'); return { plano, mexeu: 0 }; }

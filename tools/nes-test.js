@@ -670,7 +670,7 @@ function testaApu() {
    ninguem notar.
    --------------------------------------------------------------------------- */
 function fontesDaSerie() {
-  const dir = path.join(__dirname, '..', 'Arq_asm');
+  const dir = path.join(__dirname, '..', 'Arq_nave');
   let nomes = [];
   try { nomes = fs.readdirSync(dir); } catch (err) { return []; }
   return nomes.filter(n => /^nes-nave-\d+\.asm$/i.test(n))
@@ -852,7 +852,7 @@ function testaExemplo(caminho) {
 
 function testaExemplos() {
   const fontes = fontesDaSerie();
-  if (!fontes.length) { check('a série nes-nave-N existe', false, 'nenhum em Arq_asm/'); return; }
+  if (!fontes.length) { check('a série nes-nave-N existe', false, 'nenhum em Arq_nave/'); return; }
   for (const f of fontes) testaExemplo(f);
 }
 

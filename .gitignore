@@ -33,4 +33,4 @@ Arq_nes/
 
 # ...menos a serie de exemplos daqui, que e nossa e de dominio publico: vai
 # montada junto do fonte para dar de abrir e jogar sem montar nada.
-!Arq_asm/nes-nave-*.nes
+!Arq_nave/*.nes

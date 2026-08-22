@@ -33,9 +33,10 @@ const DEFINES = {
   combat:    ['-DTIA_BASE_READ_ADDRESS=$30'],
 };
 
-/* Monta todo .asm que estiver na raiz e em Arq_asm/. O repositorio traz os
-   exemplos originais (barras, nave, dialeto); se voce tiver outros fontes na
-   sua copia -- disassemblies, jogos seus -- eles entram no teste sozinhos.
+/* Monta todo .asm que estiver na raiz, em Arq_asm/ e em Arq_nave/. O
+   repositorio traz os exemplos originais (barras, dialeto, e a serie da nave);
+   se voce tiver outros fontes na sua copia -- disassemblies, jogos seus -- eles
+   entram no teste sozinhos.
 
    Fora os de NES: ines, bank e chrbank sao extensao deste montador, e o DASM de
    verdade nao as conhece -- comparar os dois byte a byte seria comparar com um
@@ -48,7 +49,7 @@ const ehNes = arquivo => {
 
 function acharFontes() {
   const achados = [], nes = [];
-  for (const dir of ['Arq_asm', '.']) {
+  for (const dir of ['Arq_asm', 'Arq_nave', '.']) {
     const cheio = path.join(ROOT, dir);
     let nomes = [];
     try { nomes = fs.readdirSync(cheio); } catch (err) { continue; }

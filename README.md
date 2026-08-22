@@ -140,21 +140,28 @@ código, e para essas não há CHR no arquivo para editar.
 
 ## Os exemplos
 
-Três fontes originais, em domínio público, em `Arq_asm/`:
+Tudo original e em domínio público. Em `Arq_asm/`, os fontes soltos:
 
 | | O que é |
 |---|---|
 | `barras.asm` | o menor kernel que dá imagem estável: uma cor por scanline, varrendo a paleta, escorregando a cada quadro |
-| `nave.asm` | um sprite que anda com o joystick — posicionamento horizontal, playfield espelhado, kernel de linha única. A tabela `.byte` dele abre na galeria do editor |
 | `dialeto.asm` | não é jogo: passa por todo canto do montador (macro com argumento, `REPEAT`, condicional, `RORG`, `SET`, `EQM`, rótulo local, opcode não documentado) para o teste ter o que comparar |
-| `nes-nave-0.asm` | o `nave.asm` refeito para o NES, para os dois serem lidos em par: o mesmo jogo, e a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar |
-| `nes-nave-1.asm` | o mesmo, com tiro: o botão A dispara (na página, a barra de espaço também), um tiro por vez, disparo por borda para segurar o botão não metralhar |
+
+E em `Arq_nave/`, a nave — o mesmo jogo crescendo, primeiro no 2600 e depois
+no NES:
+
+| | O que é |
+|---|---|
+| `nave.asm` | **2600.** Um sprite que anda com o joystick — posicionamento horizontal, playfield espelhado, kernel de linha única. A tabela `.byte` dele abre na galeria do editor |
+| `nes-nave-0.asm` | **NES.** O mesmo programa, para os dois serem lidos em par: a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar |
+| `nes-nave-1.asm` | com tiro: o botão A dispara (na página, a barra de espaço também), um tiro por vez, disparo por borda para segurar o botão não metralhar |
 | `nes-nave-2.asm` | agora há o que derrubar: uma nave inimiga cruza o alto, o tiro a abate e ela volta pela borda depois de um tempo. A colisão é conta de caixa feita no código — o NES só tem detecção de hardware para o sprite 0, e ela não serve para isto. O inimigo usa a paleta 1 de sprites, que é o que o byte de atributo escolhe |
 
 A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
 novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
-depois do outro e ver exatamente o que mudou — inclusive com `diff`. O `.nes`
-montado vem junto de cada um, então dá para só abrir e jogar.
+depois do outro e ver exatamente o que mudou — inclusive com `diff`, que é a
+explicação mais curta que existe. O `.nes` montado vem junto de cada um, então
+dá para só abrir e jogar.
 
 Duas coisas seguem o último da série sozinhas: o botão *Carregar o exemplo* da
 aba Fonte (o `tools/embutir.js` repõe) e o `nes-test.js`, que roda em **todos**
@@ -171,7 +178,7 @@ alvo, porque o tiro leva 34 quadros para subir e nesse tempo o inimigo anda.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o
-`dasm-test.js` acham sozinhos, e o `.gitignore` já mantém fora do controle de
+`dasm-test.js` varrem essa pasta, a `Arq_nave/` e a raiz, e acham sozinhos, e o `.gitignore` já mantém fora do controle de
 versão os que costumam aparecer.
 
 O montador e o editor sabem passar `TIA_BASE_READ_ADDRESS=$30` para fontes que

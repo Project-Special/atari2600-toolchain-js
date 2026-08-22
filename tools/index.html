@@ -6993,15 +6993,14 @@ details.hint[open] { margin-bottom: 4px; }
 <!-- o exemplo que a aba Fonte carrega; e o mesmo Arq_asm/nes-nave.asm -->
 <script type="text/plain" id="exemploAsm">
 ; =============================================================================
-; nes-nave-2.asm -- agora ha o que derrubar
+; nes-nave-3.asm -- com som
 ;
-; O que mudou do -1 para ca:
-;   * uma nave inimiga cruza o alto da tela, da esquerda para a direita
-;   * o tiro derruba ela; depois de um tempo ela volta pela borda
-;   * a colisao e conta de caixa, feita no codigo -- o NES so tem deteccao de
-;     hardware para o sprite 0, e ela nao serve para isto
-;   * sprite 2 e o inimigo, tile 4 o desenho, e ele usa a paleta 1 de sprites,
-;     que e o que o byte de atributo escolhe
+; O que mudou do -2 para ca:
+;   * o tiro tem som: um pulso que cai de tom, feito pela varredura da APU
+;   * a explosao tem som: um estouro no canal de ruido, morrendo pelo envelope
+;   * os dois usam o hardware em vez de mexer no som quadro a quadro -- e por
+;     isso que sao cinco escritas cada um, e nao uma rotina de som
+;   * o $4017 passou a ser escrito no arranque, desligando a interrupcao da APU
 ;
 ; O -0 e o mesmo programa que o nave.asm do 2600, para os dois serem lidos em
 ; par. Daqui em diante os numeros contam o que foi mudando -- diff entre dois
@@ -7037,7 +7036,13 @@ PPUDATA         = $2007
 OAMDMA          = $4014
 APUSTATUS       = $4015
 JOY1            = $4016
-JOY2            = $4017
+JOY2            = $4017         ; o mesmo endereco e o contador de quadros da APU
+
+; Os quatro registradores de cada canal ficam seguidos, entao vale nomear so o
+; primeiro e somar: PULSE1+1 e a varredura, PULSE1+2 o periodo, e assim por
+; diante.
+PULSE1          = $4000
+NOISE           = $400C
 
 ; --- botoes, na ordem em que o controle entrega ------------------------------
 ; O laco de leitura entrega o A primeiro e o Direita por ultimo, e cada um
@@ -7063,6 +7068,22 @@ INIMIGO_Y       = 40            ; a altura em que ele cruza
 INIMIGO_VEL     = 1             ; devagar: da tempo de mirar
 INIMIGO_ESPERA  = 90            ; quadros ate voltar depois de cair
 PERTO           = 8             ; a caixa da colisao tem a largura de um tile
+
+; --- som ---------------------------------------------------------------------
+; A APU tem envelope e varredura no proprio hardware: uma vez armados, eles
+; andam sozinhos a cada quadro. Entao "tocar" aqui e so escrever os quatro
+; registradores do canal e deixar quieto -- nao ha rotina de som andando junto
+; com o jogo.
+TIRO_DUTY       = %10001100     ; onda 50%, envelope no lugar do volume fixo
+TIRO_SWEEP      = %10010011     ; varredura ligada: o periodo cresce, o tom cai
+TIRO_PERIODO    = $80           ; onde o "piu" comeca
+TIRO_COMPR      = %00001000     ; contador de comprimento, periodo alto = 0
+
+BUM_ENVELOPE    = %00001111     ; envelope no mais lento: o estouro morre devagar
+BUM_TOM         = %00001000     ; ruido longo -- o grave, nao o metalico
+BUM_COMPR       = %00110000     ; recarrega o comprimento e reinicia o envelope
+
+CANAIS          = %00001001     ; pulso 1 e ruido; o resto fica desligado
 
 CHAO            = $2000 + 26*32 ; onde na grade do fundo o chao comeca
 
@@ -7107,6 +7128,12 @@ reset   subroutine
         stx PPUMASK             ; e a tela
         stx APUSTATUS           ; e o som
 
+        ; O contador de quadros da APU nasce pedindo interrupcao. Nao usamos
+        ; IRQ, e como o programa habilita interrupcao no fim do arranque, ela
+        ; ficaria batendo a toa sessenta vezes por segundo. O bit 6 desliga.
+        lda #%01000000
+        sta JOY2
+
         ; A PPU leva dois quadros para acordar. Ate la ela ignora escrita, e
         ; quem nao espera acaba com paleta pela metade.
         bit PPUSTATUS
@@ -7128,6 +7155,9 @@ reset   subroutine
         sta naveX
         lda #1
         sta inimigoVivo         ; ele ja comeca cruzando
+
+        lda #CANAIS             ; sem isto os canais ficam mudos, escreva o que
+        sta APUSTATUS           ; escrever nos outros registradores
 
         ; Rolagem zerada. Sao duas escritas no mesmo registrador: a primeira e
         ; o x, a segunda o y. Sem isto a tela nasce deslocada, porque as
@@ -7259,6 +7289,7 @@ atirar  subroutine
         sta tiroX
         lda #NAVE_Y - 6         ; e logo acima dela
         sta tiroY
+        jsr somTiro
 .fim    rts
 
 ; -----------------------------------------------------------------------------
@@ -7344,6 +7375,7 @@ colidir subroutine
         sta tiroY
         lda #INIMIGO_ESPERA
         sta espera
+        jsr somExplosao
 .fim    rts
 
 ; -----------------------------------------------------------------------------
@@ -7391,6 +7423,40 @@ montarSprites subroutine
         sta sprites+10
         lda inimigoX
         sta sprites+11          ; x
+        rts
+
+; -----------------------------------------------------------------------------
+; O "piu" do tiro
+;
+; Quem faz o tom cair e a varredura da APU, nao o programa: armada uma vez, ela
+; aumenta o periodo sozinha a cada quadro, e o tom desce junto. Quando o periodo
+; passa do limite ela cala o canal -- entao o som termina sem ninguem mandar.
+; -----------------------------------------------------------------------------
+somTiro subroutine
+        lda #TIRO_DUTY
+        sta PULSE1
+        lda #TIRO_SWEEP
+        sta PULSE1+1
+        lda #TIRO_PERIODO
+        sta PULSE1+2
+        lda #TIRO_COMPR
+        sta PULSE1+3            ; escrever aqui dispara o som
+        rts
+
+; -----------------------------------------------------------------------------
+; O estouro da nave inimiga
+;
+; O canal de ruido e um gerador de numeros pseudoaleatorios ligado no alto-
+; falante -- e por isso que serve tao bem para explosao. O volume nao e fixo:
+; quem o derruba e o envelope, tambem no hardware.
+; -----------------------------------------------------------------------------
+somExplosao subroutine
+        lda #BUM_ENVELOPE
+        sta NOISE
+        lda #BUM_TOM
+        sta NOISE+2
+        lda #BUM_COMPR
+        sta NOISE+3             ; e aqui que ele estoura
         rts
 
 ; -----------------------------------------------------------------------------

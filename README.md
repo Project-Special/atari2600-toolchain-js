@@ -156,6 +156,7 @@ no NES:
 | `nes-nave-0.asm` | **NES.** O mesmo programa, para os dois serem lidos em par: a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar |
 | `nes-nave-1.asm` | com tiro: o botão A dispara (na página, a barra de espaço também), um tiro por vez, disparo por borda para segurar o botão não metralhar |
 | `nes-nave-2.asm` | agora há o que derrubar: uma nave inimiga cruza o alto, o tiro a abate e ela volta pela borda depois de um tempo. A colisão é conta de caixa feita no código — o NES só tem detecção de hardware para o sprite 0, e ela não serve para isto. O inimigo usa a paleta 1 de sprites, que é o que o byte de atributo escolhe |
+| `nes-nave-3.asm` | com som: o tiro é um pulso que cai de tom pela varredura da APU, a explosão é um estouro no canal de ruído morrendo pelo envelope. Os dois são cinco escritas cada e mais nada — quem toca é o hardware, não uma rotina andando junto com o jogo |
 
 A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
 novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
@@ -175,6 +176,11 @@ borda, e — de onde existem — que o tiro sai, sobe, some no alto e não vira
 metralhadora com o botão preso, e que o inimigo cruza a tela, cai quando é
 acertado e volta depois da espera. Esse último caso **joga**: mira adiante do
 alvo, porque o tiro leva 34 quadros para subir e nesse tempo o inimigo anda.
+
+O som também é medido, não só ouvido: que fique mudo parado, que o disparo faça
+barulho, que o tom caia, e que os dois sons **terminem sozinhos** — som que não
+acaba é o defeito clássico de quem arma o canal e esquece o contador de
+comprimento.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o

@@ -848,6 +848,101 @@ function testaExemplo(caminho) {
   for (let f = 0; f < 200; f++) { j.anda(1); if (voltou < 0 && ondeEstaOInimigo() >= 0) voltou = f; }
   check(nome + ': e volta depois da espera', voltou >= 80 && voltou <= 100,
     'voltou ' + voltou + ' quadros depois (INIMIGO_ESPERA é 90)');
+
+  /* e o som so a partir do -3 */
+  if (!/somTiro/.test(fs.readFileSync(caminho, 'utf8'))) return;
+  testaSomDoJogo(nome, r.rom);
+}
+
+/* ---------------------------------------------------------------------------
+   O som do jogo
+
+   Num console de verdade e no ouvido que isto se confere. Aqui da para medir o
+   que importa: que fique mudo parado, que o disparo faca barulho, que o tom
+   caia -- a varredura da APU e quem faz isso -- e que os dois sons terminem
+   sozinhos, sem ninguem mandar parar. Som que nao acaba e o defeito classico
+   de quem arma o canal e esquece do contador de comprimento.
+
+   O emulador comeca com uma maquina nova, para o teste anterior nao deixar som
+   sobrando no meio da medida.
+   --------------------------------------------------------------------------- */
+function testaSomDoJogo(nome, rom) {
+  const n = NES.create();
+  n.load(rom);
+
+  /* amplitude de um trecho, e a frequencia por cruzamento de zero */
+  const ouvir = (quadros, botao) => {
+    const som = [];
+    if (botao) n.setButton(0, botao, true);
+    for (let f = 0; f < quadros; f++) {
+      const o = n.frame();
+      for (let i = 0; i < o.audio.length; i++) som.push(o.audio[i]);
+    }
+    if (botao) n.setButton(0, botao, false);
+    let alto = -Infinity, baixo = Infinity, cruz = 0, ant = som[0];
+    for (const v of som) {
+      if (v > alto) alto = v;
+      if (v < baixo) baixo = v;
+      if ((ant < 0) !== (v < 0)) cruz++;
+      ant = v;
+    }
+    return { amp: alto - baixo, hz: cruz / 2 / (som.length / NES.AUDIO_RATE) };
+  };
+
+  ouvir(30);                                   // deixa o passa-alta acomodar
+  check(nome + ': parado, o jogo fica mudo', ouvir(20).amp < 0.001,
+    'amplitude ' + ouvir(10).amp.toFixed(4));
+
+  const inicio = ouvir(6, 'a');
+  check(nome + ': o disparo faz som', inicio.amp > 0.1,
+    'amplitude ' + inicio.amp.toFixed(3) + ', ~' + inicio.hz.toFixed(0) + ' Hz');
+
+  const depois = ouvir(6);
+  check(nome + ': e o tom do tiro cai', depois.hz > 0 && depois.hz < inicio.hz * 0.85,
+    inicio.hz.toFixed(0) + ' Hz -> ' + depois.hz.toFixed(0) + ' Hz');
+
+  ouvir(40);                                   // o piu tem que morrer sozinho
+  check(nome + ': o tiro se cala sozinho', ouvir(10).amp < 0.001,
+    'amplitude ' + ouvir(10).amp.toFixed(4) + ' depois de meio segundo');
+
+  /* a explosao: derruba o inimigo e ouve o estouro */
+  const meio = (y0, y1, cores, tela) => {
+    const ceu = tela.pixels[10 * 256 + 2];
+    let x0 = -1, x1 = -1;
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < 256; x++) {
+        const p = tela.pixels[y * 256 + x];
+        if (p === ceu || (cores && cores.indexOf(p) < 0)) continue;
+        if (x0 < 0 || x < x0) x0 = x;
+        if (x > x1) x1 = x;
+      }
+    }
+    return x0 < 0 ? -1 : ((x0 + x1) / 2) | 0;
+  };
+  const VOO = Math.ceil((180 - 6 - 40) / 4);
+  let tela = n.frame(), caiu = false;
+  for (let f = 0; f < 900 && !caiu; f++) {
+    const alvo = meio(36, 50, [cor(0x27), cor(0x14)], tela);
+    if (alvo < 0) { caiu = true; break; }
+    const d = (alvo + VOO) - meio(178, 192, null, tela);
+    n.setButton(0, 'right', d > 2);
+    n.setButton(0, 'left', d < -2);
+    n.setButton(0, 'a', Math.abs(d) <= 2 && f % 4 === 0);
+    tela = n.frame();
+  }
+  for (const b of ['right', 'left', 'a']) n.setButton(0, b, false);
+  if (!caiu) { check(nome + ': a explosão faz som', false, 'não consegui derrubar o inimigo'); return; }
+
+  const bum = ouvir(8);
+  check(nome + ': a explosão faz som', bum.amp > 0.3, 'amplitude ' + bum.amp.toFixed(3));
+
+  const morrendo = ouvir(20);
+  check(nome + ': e o estouro vai morrendo', morrendo.amp < bum.amp * 0.9,
+    bum.amp.toFixed(3) + ' -> ' + morrendo.amp.toFixed(3));
+
+  ouvir(60);
+  check(nome + ': até se calar sozinho', ouvir(10).amp < 0.01,
+    'amplitude ' + ouvir(10).amp.toFixed(4));
 }
 
 function testaExemplos() {

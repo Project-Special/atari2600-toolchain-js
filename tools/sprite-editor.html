@@ -1,4 +1,4 @@
-<title>TIA Sprite Bench</title>
+<title>Editor Emulador Atari</title>
 <!-- O icone da aba: a nave do Arq_asm/nave.asm, oito por oito pixels, em
      branco sobre o azul da TIA. A grade de 8 divide certo em 16, 32 e 64,
      entao o desenho sai com pixel inteiro em qualquer tamanho de aba. -->
@@ -1163,7 +1163,7 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
 </style>
 
 <header class="bar">
-  <h1>TIA Sprite Bench</h1>
+  <h1>Editor Emulador Atari</h1>
   <span class="sub" id="docname">editor de player sprite para Atari&nbsp;2600</span>
   <span class="spacer"></span>
   <span class="stat" id="stat"></span>
@@ -1573,7 +1573,7 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
 </dialog>
 
 <dialog id="dlgAbout">
-  <h3>TIA Sprite Bench</h3>
+  <h3>Editor Emulador Atari</h3>
   <div class="body">
     <p>Editor de sprites de player do Atari&nbsp;2600. A paleta é a NTSC do
     Stella; a prévia usa 160 color clocks por linha e pixel 1,6&times; mais
@@ -1652,7 +1652,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 10:55';
+const APP_BUILD = '2026-08-22 11:00';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -4740,7 +4740,7 @@ VERSION_MACRO         = 109
 })();
 
 /* ==========================================================================
-   VCS — emulador de Atari 2600 escrito para o TIA Sprite Bench.
+   VCS — o nucleo de Atari 2600 do Editor Emulador Atari.
 
    Núcleo próprio: CPU 6507 (6502 sem os pinos de endereço altos), TIA e RIOT
    6532, mais cartucho 2K/4K/F8/F6/E0/FE. Escrito olhando a documentação de

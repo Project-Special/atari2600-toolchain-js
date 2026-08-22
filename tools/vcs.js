@@ -1,5 +1,5 @@
 /* ==========================================================================
-   VCS — emulador de Atari 2600 escrito para o TIA Sprite Bench.
+   VCS — o nucleo de Atari 2600 do Editor Emulador Atari.
 
    Núcleo próprio: CPU 6507 (6502 sem os pinos de endereço altos), TIA e RIOT
    6532, mais cartucho 2K/4K/F8/F6/E0/FE. Escrito olhando a documentação de

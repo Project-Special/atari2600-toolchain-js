@@ -4,8 +4,9 @@ Montador, emuladores e editores para **Atari 2600** e **NES** — tudo em
 JavaScript, sem nada instalado, cada editor numa página que abre direto no
 navegador. Nenhuma chamada de rede, nenhum servidor, nenhum executável.
 
-Um arquivo só: **[index.html](index.html)**. Ele tem o seletor de console no
-topo e os dois editores inteiros dentro, cada um guardado num `<template>`:
+Um arquivo só: **[tools/index.html](tools/index.html)**. Ele tem o seletor de
+console no topo e os dois editores inteiros dentro, cada um guardado num
+`<template>`:
 
 - **Editor Emulador Atari** — lê o `.asm`, mostra cada tabela `.byte` como
   sprite, monta o fonte e roda a ROM ali mesmo.
@@ -29,7 +30,7 @@ O endereço aceita `#atari` e `#nes` para abrir direto num deles, e ele lembra o
 
 | Ferramenta | Arquivo | O que faz |
 |---|---|---|
-| Os editores | `index.html` | arquivo único: os dois consoles, com montador e emuladores dentro |
+| Os editores | `tools/index.html` | arquivo único: os dois consoles, com montador e emuladores dentro |
 | Montador | `tools/dasm.js` | monta 6502 falando o dialeto do DASM, no navegador ou no Node |
 | Emulador | `tools/vcs.js` | núcleo próprio: CPU 6507, TIA e RIOT em lockstep com o color clock |
 | Compilar pelo terminal | `tools/build.js` | grava `.bin`, `.lst` e `.sym` |
@@ -68,7 +69,7 @@ os inclui mesmo aberta de um `file://`.
 
 O `dasm.js`, o `vcs.js`, o `nes.js` e a paleta vivem duas vezes: como arquivo em
 `tools/`, para o Node e para os testes, e copiados inteiros dentro do
-`index.html`, para a página não depender de nada. O `dasm-test.js` compara as
+`tools/index.html`, para a página não depender de nada. O `dasm-test.js` compara as
 duas cópias e reclama quando uma fica para trás.
 
 **Conferido:** `node tools/dasm-test.js` monta cada `.asm` da raiz e de

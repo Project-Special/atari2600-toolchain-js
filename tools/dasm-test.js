@@ -11,7 +11,8 @@
    Os fontes testados sao todos os .asm da raiz e de Arq_asm/.
 
    Também confere as cópias que vivem embutidas: o vcs.h/macro.h dentro do
-   dasm.js, e o dasm.js, o vcs.js e o nes.js inteiros dentro do index.html.
+   dasm.js, e o dasm.js, o vcs.js e o nes.js inteiros dentro do
+   tools/index.html.
    Sai com status 1 se algo divergir.
    ========================================================================== */
 
@@ -89,9 +90,9 @@ function checkEmbedded() {
     }
   }
 
-  /* os editores moram todos no index.html da raiz, cada um dentro de um
-     <template>; e la que as copias embutidas tem que estar em dia */
-  const page = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  /* os editores moram todos no index.html daqui do tools, cada um dentro de
+     um <template>; e la que as copias embutidas tem que estar em dia */
+  const page = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 
   // a tabela NTSC vive duas vezes: no palette.js e dentro da página
   const inPage = /const NTSC = \[([\s\S]*?)\];/.exec(page);

@@ -9,7 +9,7 @@
        node tools/build.js jogo.asm --out D:\pasta      # destino fixo
 
    Para rodar a ROM, use o emulador embutido no editor de sprites
-   (index.html, no console Atari: Arquivo > Compilar e rodar).
+   (tools/index.html, no console Atari: Arquivo > Compilar e rodar).
    ========================================================================== */
 
 'use strict';

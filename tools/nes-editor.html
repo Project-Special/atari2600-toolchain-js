@@ -88,6 +88,7 @@ h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: u
   <span style="width:12px"></span>
   <button id="btRun" disabled>Rodar</button>
   <button id="btReset" disabled>Reiniciar</button>
+  <button id="btSound">Som ligado</button>
   <span style="width:12px"></span>
   <button id="btUndo" disabled>Desfazer</button>
   <label>banco de CHR</label>
@@ -121,7 +122,8 @@ h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: u
     <div class="info" id="emuInfo">parado</div>
     <p class="hint">Setas movem, <b>Z</b> é o B, <b>X</b> é o A, <b>Enter</b> é Start,
     <b>Shift</b> é Select. O que você desenhar entra na ROM que está rodando —
-    é só clicar em Rodar de novo.</p>
+    é só clicar em Rodar de novo. O som sai pelos cinco canais da APU —
+    dois pulsos, triângulo, ruído e o DMC.</p>
   </section>
 </main>
 
@@ -159,6 +161,9 @@ const NES = (() => {
   /* os mappers que este nucleo entende */
   const MAPPERS = { 0: 'NROM', 1: 'MMC1', 2: 'UxROM', 3: 'CNROM', 4: 'MMC3', 7: 'AxROM' };
   const DOTS_PER_LINE = 341;
+  const CPU_HZ = 1789773;              // NTSC
+  const CLOCKS_PER_AUDIO = 40;         // uma amostra a cada 40 ciclos de CPU
+  const AUDIO_RATE = Math.round(CPU_HZ / CLOCKS_PER_AUDIO);
   const LINES_PER_FRAME = 262;
 
   /* A paleta do 2C02 em RGB. O NES nao tem paleta programavel de verdade: os
@@ -673,6 +678,339 @@ const NES = (() => {
       }
     }
 
+    /* saida de audio: o mesmo formato do emulador de 2600 -- um Float32Array
+       de -1 a 1, entregue junto com o quadro */
+    let audioBuf = new Float32Array(4096);
+    let audioLen = 0;
+    let audioClock = 0;
+
+    /* =====================================================================
+       APU 2A03
+
+       Cinco canais: dois pulsos, triangulo, ruido e o DMC, que toca amostras
+       lidas do proprio PRG. Um contador de quadros bate a ~240 Hz e e ele quem
+       anda os envelopes, os contadores de duracao e a varredura.
+
+       Os temporizadores dos pulsos, do ruido e do DMC andam a cada dois ciclos
+       de CPU; o do triangulo anda a cada ciclo -- e por isso que ele alcanca
+       frequencias mais altas com o mesmo periodo.
+       ===================================================================== */
+    const DUTY = [
+      [0, 1, 0, 0, 0, 0, 0, 0],   // 12,5%
+      [0, 1, 1, 0, 0, 0, 0, 0],   // 25%
+      [0, 1, 1, 1, 1, 0, 0, 0],   // 50%
+      [1, 0, 0, 1, 1, 1, 1, 1],   // 25% invertido
+    ];
+    const LENGTH = [
+      10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14,
+      12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30,
+    ];
+    const TRI_SEQ = [
+      15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    ];
+    const NOISE_PERIOD = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068];
+    const DMC_RATE = [428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54];
+
+    /* um canal de pulso */
+    function makePulse(second) {
+      return {
+        second,                    // o segundo pulso varre a frequencia de um jeito diferente
+        enabled: false,
+        duty: 0, step: 0,
+        timer: 0, period: 0,
+        length: 0, halt: false,
+        constant: false, volume: 0,
+        envStart: false, envDivider: 0, envDecay: 0,
+        sweepEnable: false, sweepPeriod: 0, sweepNegate: false, sweepShift: 0,
+        sweepReload: false, sweepDivider: 0,
+      };
+    }
+    const pulse = [makePulse(false), makePulse(true)];
+
+    const tri = { enabled: false, timer: 0, period: 0, step: 0,
+                  length: 0, halt: false, linear: 0, linearReload: 0, linearStart: false };
+
+    const noise = { enabled: false, timer: 0, period: 4, shift: 1, mode: false,
+                    length: 0, halt: false, constant: false, volume: 0,
+                    envStart: false, envDivider: 0, envDecay: 0 };
+
+    const dmc = { enabled: false, irqEnable: false, loop: false, rate: DMC_RATE[0], timer: 0,
+                  addr: 0xc000, len: 0, cur: 0, remaining: 0,
+                  shift: 0, bits: 0, level: 0, silence: true, irq: false };
+
+    let frameMode = 0;            // 0 = quatro passos, 1 = cinco
+    let frameIrqOff = false, frameIrq = false;
+    let frameCycle = 0, frameSeq = 0;
+
+    const envVolume = ch => (ch.constant ? ch.volume : ch.envDecay);
+
+    /* a varredura muda o periodo do pulso; se o alvo estourar, o canal cala */
+    function sweepTarget(ch) {
+      const change = ch.period >> ch.sweepShift;
+      if (ch.sweepNegate) return ch.period - change - (ch.second ? 0 : 1);
+      return ch.period + change;
+    }
+    const pulseMuted = ch => ch.period < 8 || sweepTarget(ch) > 0x7ff;
+
+    function clockEnvelope(ch) {
+      if (ch.envStart) {
+        ch.envStart = false;
+        ch.envDecay = 15;
+        ch.envDivider = ch.volume;
+      } else if (ch.envDivider-- === 0) {
+        ch.envDivider = ch.volume;
+        if (ch.envDecay > 0) ch.envDecay--;
+        else if (ch.halt) ch.envDecay = 15;
+      }
+    }
+
+    function clockQuarter() {          // ~240 Hz: envelopes e o contador linear
+      clockEnvelope(pulse[0]);
+      clockEnvelope(pulse[1]);
+      clockEnvelope(noise);
+      if (tri.linearStart) tri.linear = tri.linearReload;
+      else if (tri.linear > 0) tri.linear--;
+      if (!tri.halt) tri.linearStart = false;
+    }
+
+    function clockHalf() {             // ~120 Hz: duracao e varredura
+      for (const ch of pulse) {
+        if (!ch.halt && ch.length > 0) ch.length--;
+        if (ch.sweepDivider === 0 && ch.sweepEnable && ch.sweepShift > 0 && !pulseMuted(ch)) {
+          const t = sweepTarget(ch);
+          if (t >= 0 && t <= 0x7ff) ch.period = t;
+        }
+        if (ch.sweepDivider === 0 || ch.sweepReload) {
+          ch.sweepDivider = ch.sweepPeriod;
+          ch.sweepReload = false;
+        } else ch.sweepDivider--;
+      }
+      if (!tri.halt && tri.length > 0) tri.length--;
+      if (!noise.halt && noise.length > 0) noise.length--;
+    }
+
+    /* o contador de quadros e medido em ciclos de CPU */
+    function clockFrameCounter() {
+      frameCycle++;
+      const marks = frameMode ? [7457, 14913, 22371, 29829, 37281]
+                              : [7457, 14913, 22371, 29829];
+      if (frameCycle === marks[frameSeq]) {
+        if (frameMode) {
+          if (frameSeq !== 3) clockQuarter();
+          if (frameSeq === 1 || frameSeq === 4) clockHalf();
+        } else {
+          clockQuarter();
+          if (frameSeq === 1 || frameSeq === 3) clockHalf();
+          if (frameSeq === 3 && !frameIrqOff) frameIrq = true;
+        }
+        frameSeq++;
+        if (frameSeq >= marks.length) { frameSeq = 0; frameCycle = 0; }
+      }
+    }
+
+    /* o DMC le uma amostra do PRG, um byte por vez */
+    function dmcFill() {
+      if (dmc.bits !== 0 || dmc.remaining === 0) return;
+      dmc.shift = cpuRead(dmc.cur);
+      dmc.bits = 8;
+      dmc.silence = false;
+      dmc.cur = dmc.cur === 0xffff ? 0x8000 : dmc.cur + 1;
+      dmc.remaining--;
+      if (dmc.remaining === 0) {
+        if (dmc.loop) { dmc.cur = dmc.addr; dmc.remaining = dmc.len; }
+        else if (dmc.irqEnable) { dmc.irq = true; irqPending = true; }
+      }
+    }
+
+    function clockDmc() {
+      if (dmc.timer-- > 0) return;
+      dmc.timer = dmc.rate;
+      if (!dmc.silence) {
+        if (dmc.shift & 1) { if (dmc.level <= 125) dmc.level += 2; }
+        else if (dmc.level >= 2) dmc.level -= 2;
+      }
+      dmc.shift >>= 1;
+      if (--dmc.bits <= 0) { dmc.bits = 0; dmcFill(); if (dmc.bits === 0) dmc.silence = true; }
+    }
+
+    let hpIn = 0, hpOut = 0;      // estado do passa-alta da saida
+    let apuEven = false;
+    function apuTick() {
+      clockFrameCounter();
+
+      /* o triangulo anda todo ciclo */
+      if (tri.timer-- <= 0) {
+        tri.timer = tri.period;
+        if (tri.length > 0 && tri.linear > 0 && tri.period >= 2) tri.step = (tri.step + 1) & 31;
+      }
+
+      apuEven = !apuEven;
+      if (apuEven) {                       // pulsos, ruido e DMC: um a cada dois
+        for (const ch of pulse) {
+          if (ch.timer-- <= 0) {
+            ch.timer = ch.period;
+            ch.step = (ch.step + 1) & 7;
+          }
+        }
+        if (noise.timer-- <= 0) {
+          noise.timer = noise.period;
+          const bit = noise.mode ? (noise.shift >> 6) & 1 : (noise.shift >> 1) & 1;
+          const fb = ((noise.shift & 1) ^ bit) << 14;
+          noise.shift = (noise.shift >> 1) | fb;
+        }
+        clockDmc();
+      }
+
+      if (frameIrq && !frameIrqOff) irqPending = true;
+
+      if (++audioClock >= CLOCKS_PER_AUDIO) { audioClock = 0; audioSample(); }
+    }
+
+    /* A mistura do NES nao e linear: os dois pulsos entram numa formula e o
+       resto em outra. Os numeros sao os do NESdev. */
+    function audioSample() {
+      let p = 0;
+      for (const ch of pulse) {
+        if (ch.enabled && ch.length > 0 && !pulseMuted(ch)) p += DUTY[ch.duty][ch.step] * envVolume(ch);
+      }
+      /* o triangulo nao zera quando cala: o sequenciador para e a saida fica
+         onde estava. Quem tira esse nivel parado e o passa-alta la embaixo. */
+      const t = TRI_SEQ[tri.step];
+      const n = (noise.enabled && noise.length > 0 && !(noise.shift & 1)) ? envVolume(noise) : 0;
+      const d = dmc.level;
+
+      const pulseOut = p ? 95.88 / (8128 / p + 100) : 0;
+      const tnd = t / 8227 + n / 12241 + d / 22638;
+      const tndOut = tnd ? 159.79 / (1 / tnd + 100) : 0;
+      const raw = pulseOut + tndOut;                // 0 a ~0,72
+
+      /* O console tem filtros passa-alta na saida, e sao eles que tiram o nivel
+         parado -- sem isto o sinal fica todo de um lado do zero e o canal mudo
+         nao e silencio, e sim um degrau. Um polo em ~90 Hz da conta. */
+      hpOut = 0.996 * (hpOut + raw - hpIn);
+      hpIn = raw;
+      const out = hpOut * 2;
+      if (audioLen < audioBuf.length) {
+        audioBuf[audioLen++] = out > 1 ? 1 : (out < -1 ? -1 : out);
+      }
+    }
+
+    function apuWrite(a, v) {
+      switch (a) {
+        case 0x4000: case 0x4004: {
+          const ch = pulse[a === 0x4000 ? 0 : 1];
+          ch.duty = (v >> 6) & 3;
+          ch.halt = !!(v & 0x20);
+          ch.constant = !!(v & 0x10);
+          ch.volume = v & 15;
+          break;
+        }
+        case 0x4001: case 0x4005: {
+          const ch = pulse[a === 0x4001 ? 0 : 1];
+          ch.sweepEnable = !!(v & 0x80);
+          ch.sweepPeriod = (v >> 4) & 7;
+          ch.sweepNegate = !!(v & 8);
+          ch.sweepShift = v & 7;
+          ch.sweepReload = true;
+          break;
+        }
+        case 0x4002: case 0x4006: {
+          const ch = pulse[a === 0x4002 ? 0 : 1];
+          ch.period = (ch.period & 0x700) | v;
+          break;
+        }
+        case 0x4003: case 0x4007: {
+          const ch = pulse[a === 0x4003 ? 0 : 1];
+          ch.period = (ch.period & 0xff) | ((v & 7) << 8);
+          if (ch.enabled) ch.length = LENGTH[v >> 3];
+          ch.step = 0;
+          ch.envStart = true;
+          break;
+        }
+        case 0x4008:
+          tri.halt = !!(v & 0x80);
+          tri.linearReload = v & 0x7f;
+          break;
+        case 0x400a: tri.period = (tri.period & 0x700) | v; break;
+        case 0x400b:
+          tri.period = (tri.period & 0xff) | ((v & 7) << 8);
+          if (tri.enabled) tri.length = LENGTH[v >> 3];
+          tri.linearStart = true;
+          break;
+        case 0x400c:
+          noise.halt = !!(v & 0x20);
+          noise.constant = !!(v & 0x10);
+          noise.volume = v & 15;
+          break;
+        case 0x400e:
+          noise.mode = !!(v & 0x80);
+          noise.period = NOISE_PERIOD[v & 15];
+          break;
+        case 0x400f:
+          if (noise.enabled) noise.length = LENGTH[v >> 3];
+          noise.envStart = true;
+          break;
+        case 0x4010:
+          dmc.irqEnable = !!(v & 0x80);
+          dmc.loop = !!(v & 0x40);
+          dmc.rate = DMC_RATE[v & 15];
+          if (!dmc.irqEnable) dmc.irq = false;
+          break;
+        case 0x4011: dmc.level = v & 0x7f; break;
+        case 0x4012: dmc.addr = 0xc000 + (v << 6); break;
+        case 0x4013: dmc.len = (v << 4) + 1; break;
+        case 0x4015:
+          pulse[0].enabled = !!(v & 1);
+          pulse[1].enabled = !!(v & 2);
+          tri.enabled = !!(v & 4);
+          noise.enabled = !!(v & 8);
+          dmc.enabled = !!(v & 16);
+          if (!pulse[0].enabled) pulse[0].length = 0;
+          if (!pulse[1].enabled) pulse[1].length = 0;
+          if (!tri.enabled) tri.length = 0;
+          if (!noise.enabled) noise.length = 0;
+          if (!dmc.enabled) dmc.remaining = 0;
+          else if (dmc.remaining === 0) { dmc.cur = dmc.addr; dmc.remaining = dmc.len; dmcFill(); }
+          dmc.irq = false;
+          break;
+        case 0x4017:
+          frameMode = (v >> 7) & 1;
+          frameIrqOff = !!(v & 0x40);
+          if (frameIrqOff) frameIrq = false;
+          frameCycle = 0;
+          frameSeq = 0;
+          if (frameMode) { clockQuarter(); clockHalf(); }   // o modo 5 bate na hora
+          break;
+        default: break;
+      }
+    }
+
+    function apuRead4015() {
+      let out = 0;
+      if (pulse[0].length > 0) out |= 1;
+      if (pulse[1].length > 0) out |= 2;
+      if (tri.length > 0) out |= 4;
+      if (noise.length > 0) out |= 8;
+      if (dmc.remaining > 0) out |= 16;
+      if (frameIrq) out |= 0x40;
+      if (dmc.irq) out |= 0x80;
+      frameIrq = false;                   // ler limpa o aviso do contador
+      return out;
+    }
+
+    function apuReset() {
+      for (const ch of pulse) {
+        ch.enabled = false; ch.length = 0; ch.timer = 0; ch.period = 0; ch.step = 0;
+        ch.envDecay = 0; ch.envDivider = 0; ch.envStart = false;
+      }
+      tri.enabled = false; tri.length = 0; tri.linear = 0; tri.step = 0; tri.period = 0;
+      noise.enabled = false; noise.length = 0; noise.shift = 1; noise.period = NOISE_PERIOD[0];
+      dmc.enabled = false; dmc.remaining = 0; dmc.level = 0; dmc.silence = true; dmc.irq = false;
+      frameMode = 0; frameIrqOff = false; frameIrq = false; frameCycle = 0; frameSeq = 0;
+      audioLen = 0; audioClock = 0; hpIn = 0; hpOut = 0;
+    }
+
     /* =====================================================================
        Controles
        ===================================================================== */
@@ -702,7 +1040,8 @@ const NES = (() => {
         padShift[i] = (padShift[i] >> 1) | 0x80;
         return out | 0x40;
       }
-      if (a < 0x4020) return 0;                    // APU: sem som por enquanto
+      if (a === 0x4015) return apuRead4015();
+      if (a < 0x4020) return 0;
       if (a < 0x8000) return prgRam[a & 0x1fff];
       return prgRead(a);
     }
@@ -723,7 +1062,7 @@ const NES = (() => {
         if (padStrobe) { padShift[0] = buttons[0]; padShift[1] = buttons[1]; }
         return;
       }
-      if (a < 0x4020) return;                       // APU
+      if (a < 0x4020) { apuWrite(a, value); return; }
       if (a < 0x8000) { prgRam[a & 0x1fff] = value; return; }
       prgWrite(a, value);
     }
@@ -739,6 +1078,7 @@ const NES = (() => {
     function tick() {
       cycles++;
       ppuTick(); ppuTick(); ppuTick();
+      apuTick();
     }
 
     const rd = a => { tick(); return cpuRead(a); };
@@ -794,6 +1134,7 @@ const NES = (() => {
       nmiPending = false; dmaStall = 0;
       ram.fill(0); vram.fill(0); palRam.fill(0); oam.fill(0);
       pixels.fill(0);
+      apuReset();
     }
 
     function nmi() {
@@ -1023,11 +1364,12 @@ const NES = (() => {
        ===================================================================== */
     function frameStep() {
       frameDone = false;
+      audioLen = 0;
       let guard = 0;
       while (!frameDone && guard++ < 200000) step();
       // roda ate o comeco do proximo quadro visivel
       while (scanline !== 0 && guard++ < 400000) step();
-      return { pixels, frame };
+      return { pixels, frame, audio: audioBuf.subarray(0, audioLen) };
     }
 
     return {
@@ -1049,11 +1391,12 @@ const NES = (() => {
       /* para o editor de tiles: a CHR crua e os dois planos de um tile */
       get chr() { return chr; },
       get chrIsRam() { return chrIsRam; },
+      get audioRate() { return AUDIO_RATE; },
       WIDTH, HEIGHT, MASTER,
     };
   }
 
-  return { create, WIDTH, HEIGHT, MASTER };
+  return { create, WIDTH, HEIGHT, MASTER, AUDIO_RATE };
 })();
 
 /* ==========================================================================
@@ -1067,7 +1410,7 @@ const NES = (() => {
    ========================================================================== */
 'use strict';
 const $ = s => document.querySelector(s);
-const APP_BUILD = '2026-08-22 11:28';
+const APP_BUILD = '2026-08-22 11:40';
 $('#ver').textContent = 'v' + APP_BUILD.replace(/[^0-9]/g, '').slice(0, 12);
 
 /* --- estado ---------------------------------------------------------------- */
@@ -1385,6 +1728,48 @@ const screen = $('#screen'), sctx = screen.getContext('2d');
 const img = sctx.createImageData(256, 240);
 let nes = null, running = false, raf = 0;
 
+/* --- audio ------------------------------------------------------------------
+   O nucleo entrega um Float32Array por quadro, na taxa dele. Aqui a gente
+   reamostra para a taxa do navegador e vai empurrando numa fila que o
+   ScriptProcessor consome. A fila e cortada quando cresce demais: melhor
+   perder um pedacinho do que acumular atraso.
+   -------------------------------------------------------------------------- */
+let audioCtx = null, audioNode = null, audioMuted = false;
+const audioQueue = [];
+
+function audioStart() {
+  if (audioCtx || audioMuted) return;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  audioCtx = new Ctx();
+  audioNode = audioCtx.createScriptProcessor(2048, 0, 1);
+  audioNode.onaudioprocess = e => {
+    const out = e.outputBuffer.getChannelData(0);
+    for (let i = 0; i < out.length; i++) out[i] = audioQueue.length ? audioQueue.shift() : 0;
+  };
+  audioNode.connect(audioCtx.destination);
+}
+
+function audioPush(samples) {
+  if (!audioCtx || audioMuted || !samples.length) return;
+  const ratio = NES.AUDIO_RATE / audioCtx.sampleRate;
+  for (let i = 0; i < samples.length; i += ratio) audioQueue.push(samples[i | 0]);
+  if (audioQueue.length > 8192) audioQueue.splice(0, audioQueue.length - 4096);
+}
+
+function audioStop() {
+  if (audioNode) { audioNode.disconnect(); audioNode = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  audioQueue.length = 0;
+}
+
+$('#btSound').addEventListener('click', () => {
+  audioMuted = !audioMuted;
+  $('#btSound').textContent = audioMuted ? 'Som desligado' : 'Som ligado';
+  if (audioMuted) audioStop();
+  else if (running) audioStart();
+});
+
 const KEYS = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
   KeyZ: 'b', KeyX: 'a', Enter: 'start', ShiftLeft: 'select', ShiftRight: 'select',
@@ -1397,6 +1782,7 @@ $('#btRun').addEventListener('click', () => {
     nes.load(rom);                    // sempre a ROM como esta agora, com as edicoes
   } catch (err) { say(String(err.message || err), true); return; }
   running = true;
+  audioStart();
   $('#btRun').textContent = 'Parar';
   say('rodando ' + romName);
   loop();
@@ -1406,6 +1792,7 @@ $('#btReset').addEventListener('click', () => { if (nes) { nes.load(rom); say('r
 
 function stop() {
   running = false;
+  audioStop();
   cancelAnimationFrame(raf);
   $('#btRun').textContent = 'Rodar';
   $('#emuInfo').textContent = 'parado';
@@ -1415,6 +1802,7 @@ function stop() {
 function loop() {
   if (!running) return;
   const out = nes.frame();
+  audioPush(out.audio);
   const d = img.data;
   for (let i = 0; i < out.pixels.length; i++) {
     const c = out.pixels[i], p = i * 4;

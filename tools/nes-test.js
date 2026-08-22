@@ -516,12 +516,127 @@ function testaMmc3() {
         'virou na linha ' + corte);
 }
 
+
+/* ==========================================================================
+   Caso 6: a APU
+
+   A ROM programa o pulso 1 com periodo 253. A conta do NES e
+   f = 1789773 / (16 * (periodo + 1)), entao isso da 440,4 Hz -- um la. O teste
+   conta as passagens por zero da onda que o emulador entregou e confere se a
+   frequencia bate. Depois desliga o canal e confere que ficou mudo.
+   ========================================================================== */
+const SOM = `
+        processor 6502
+
+        seg header
+        org $0000
+        .byte "NES", $1A
+        .byte 1
+        .byte 1
+        .byte 0
+        ds 9
+
+        seg prg
+        org $0010
+        rorg $C000
+
+Reset
+        sei
+        cld
+        ldx #$FF
+        txs
+
+        lda #$40
+        sta $4017               ; contador de quadros de quatro passos, sem IRQ
+        lda #$0F
+        sta $4015               ; liga os quatro canais principais
+
+        ; --- pulso 1: onda quadrada de 50%, volume cheio, sem parar ---
+        lda #%10111111          ; duty 50%, duracao travada, volume constante 15
+        sta $4000
+        lda #%01111111          ; sem varredura
+        sta $4001
+        lda #253                ; byte baixo do periodo
+        sta $4002
+        lda #%00001000          ; byte alto = 0, contador de duracao carregado
+        sta $4003
+
+Loop    jmp Loop
+
+Mudo                            ; entrada alternativa: nao toca nada
+        sei
+        cld
+        ldx #$FF
+        txs
+        lda #$40
+        sta $4017
+        lda #0
+        sta $4015               ; todos os canais desligados
+.quiet  jmp .quiet
+
+        org $400A
+        rorg $FFFA
+        .word Reset, Reset, Reset
+`;
+
+function frequencia(amostras, taxa) {
+  /* conta as viradas de sinal e converte em Hz */
+  let cruz = 0, anterior = amostras[0] > 0;
+  for (let i = 1; i < amostras.length; i++) {
+    const agora = amostras[i] > 0;
+    if (agora !== anterior) cruz++;
+    anterior = agora;
+  }
+  return (cruz / 2) * (taxa / amostras.length);
+}
+
+function testaApu() {
+  const rom = build('som.nes', SOM);
+  const nes = NES.create();
+  nes.load(rom);
+
+  /* Junta o audio de varios quadros, jogando fora os primeiros: ao ligar, o
+     passa-alta ainda esta acomodando o degrau inicial, como no console. */
+  const tudo = [];
+  for (let f = 0; f < 14; f++) {
+    const out = nes.frame();
+    if (f < 4) continue;
+    for (let i = 0; i < out.audio.length; i++) tudo.push(out.audio[i]);
+  }
+  check('a APU entregou amostras', tudo.length > 5000, tudo.length + ' amostras');
+
+  const min = Math.min(...tudo), max = Math.max(...tudo);
+  check('a onda tem amplitude', max - min > 0.05,
+        'de ' + min.toFixed(3) + ' a ' + max.toFixed(3));
+
+  const hz = frequencia(tudo, NES.AUDIO_RATE);
+  const alvo = 1789773 / (16 * 254);
+  check('o pulso 1 saiu na frequencia certa', Math.abs(hz - alvo) < alvo * 0.05,
+        hz.toFixed(1) + ' Hz (esperado ' + alvo.toFixed(1) + ')');
+
+  /* agora a versao muda */
+  const romMudo = build('mudo.nes', SOM.replace('.word Reset, Reset, Reset',
+                                                '.word Mudo, Mudo, Mudo'));
+  const nes2 = NES.create();
+  nes2.load(romMudo);
+  const quieto = [];
+  for (let f = 0; f < 12; f++) {
+    const out = nes2.frame();
+    if (f < 6) continue;                  // depois do transitorio de ligar
+    for (let i = 0; i < out.audio.length; i++) quieto.push(out.audio[i]);
+  }
+  const varia = Math.max(...quieto) - Math.min(...quieto);
+  check('com os canais desligados, fica mudo', varia < 0.001,
+        'variacao de ' + varia.toFixed(5));
+}
+
 /* -------------------------------------------------------------------------- */
 testaCabecalho();
 testaTela();
 testaRolagem();
 testaSprite0();
 testaMmc3();
+testaApu();
 
 console.log(bad ? bad + ' caso(s) falhando' : 'emulador de NES ok');
 process.exit(bad ? 1 : 0);

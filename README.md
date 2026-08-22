@@ -90,14 +90,22 @@ Os mappers vão todos pelo mesmo par de mapas — quatro janelas de 8K no PRG e
 oito de 1K na CHR, que é o menor denominador comum entre eles: 0 (NROM),
 1 (MMC1), 2 (UxROM), 3 (CNROM), 4 (MMC3) e 7 (AxROM). O MMC3 traz o contador
 de linhas que pede IRQ, que é como SMB3, Mega Man 3–6 e Kirby partem a tela.
-**Sem som**: os registradores da APU são aceitos e ignorados.
+
+A APU tem os cinco canais — dois pulsos com envelope e varredura, triângulo com
+contador linear, ruído com o registrador de deslocamento de 15 bits e o DMC
+lendo amostras do próprio PRG — mais o contador de quadros que bate a 240 Hz e
+anda os envelopes e as durações. A mistura é a fórmula não-linear do NESdev, e
+a saída passa por um filtro passa-alta como o do console: sem ele o sinal fica
+todo de um lado do zero e canal mudo vira degrau, não silêncio.
 
 `tools/nes-test.js` monta uma ROM `.nes` com o montador daqui — cabeçalho iNES,
 16K de PRG com `RORG` para `$C000`, 8K de CHR — e confere na tela as faixas de
 cor do fundo, o sprite 0 no lugar certo, a rolagem vertical e o acerto do
 sprite 0. Um caso à parte cobre o MMC3: a tela inteira com o mesmo tile, e o
 IRQ trocando o banco de CHR na linha 120 — em cima sai uma cor, embaixo outra,
-sem tocar na VRAM.
+sem tocar na VRAM. E outro mede o som: uma ROM toca um lá no pulso 1, e o teste
+conta as passagens por zero da onda que saiu — 438,7 Hz dos 440,4 que a conta
+do NES manda.
 
 **Editando os gráficos:** o `.nes` guarda cada tile de 8x8 em 16 bytes, dois
 planos de bits — os oito primeiros dão o bit 0 da cor de cada pixel, os oito

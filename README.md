@@ -147,13 +147,24 @@ Três fontes originais, em domínio público, em `Arq_asm/`:
 | `barras.asm` | o menor kernel que dá imagem estável: uma cor por scanline, varrendo a paleta, escorregando a cada quadro |
 | `nave.asm` | um sprite que anda com o joystick — posicionamento horizontal, playfield espelhado, kernel de linha única. A tabela `.byte` dele abre na galeria do editor |
 | `dialeto.asm` | não é jogo: passa por todo canto do montador (macro com argumento, `REPEAT`, condicional, `RORG`, `SET`, `EQM`, rótulo local, opcode não documentado) para o teste ter o que comparar |
-| `nes-nave.asm` | o `nave.asm` refeito para o NES, para os dois serem lidos em par: o mesmo jogo, e a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar. É o exemplo que a aba Fonte carrega |
+| `nes-nave-0.asm` | o `nave.asm` refeito para o NES, para os dois serem lidos em par: o mesmo jogo, e a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar |
+| `nes-nave-1.asm` | o mesmo, com tiro: o botão A dispara (na página, a barra de espaço também), um tiro por vez, disparo por borda para segurar o botão não metralhar |
 
-O `nes-nave.asm` não entra na comparação contra o `dasm.exe` — as diretivas de
-NES são extensão daqui, e o DASM de verdade as recusaria. Quem confere aquele é
-o `nes-test.js`, que monta o fonte e joga com ele: confere o cabeçalho, o vetor
-de reset, a cor do céu e do chão, e que a nave anda com o controle e para na
-borda.
+A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
+novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
+depois do outro e ver exatamente o que mudou — inclusive com `diff`. O `.nes`
+montado vem junto de cada um, então dá para só abrir e jogar.
+
+Duas coisas seguem o último da série sozinhas: o botão *Carregar o exemplo* da
+aba Fonte (o `tools/embutir.js` repõe) e o `nes-test.js`, que roda em **todos**
+eles — assim mexer no `-2` não pode quebrar o `-0` sem ninguém notar.
+
+Os fontes de NES não entram na comparação contra o `dasm.exe` — as diretivas de
+NES são extensão daqui, e o DASM de verdade as recusaria. Quem confere aqueles é
+o `nes-test.js`, que monta cada um e joga com ele: confere o cabeçalho, o vetor
+de reset, a cor do céu e do chão, que a nave anda com o controle e para na
+borda, e — de onde existe tiro — que ele sai, sobe, some no alto e não vira
+metralhadora quando o botão fica preso.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o

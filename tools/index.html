@@ -1734,7 +1734,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 17:41';
+const APP_BUILD = '2026-08-22 17:50';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6971,7 +6971,9 @@ details.hint[open] { margin-bottom: 4px; }
     </div>
     <div class="info" id="emuInfo">parado</div>
     <p class="hint">Setas movem, <b>Z</b> é o B, <b>X</b> é o A, <b>Enter</b> é Start,
-    <b>Shift</b> é Select. O que você desenhar entra na ROM que está rodando —
+    <b>Shift</b> é Select, e a <b>barra de espaço</b> também é o A —
+    é com ela que a nave do exemplo atira.
+    O que você desenhar entra na ROM que está rodando —
     é só clicar em Rodar de novo. Use <b>Tela cheia</b> para ampliar o jogo;
     <b>Esc</b> volta. O som sai pelos cinco canais da APU —
     dois pulsos, triângulo, ruído e o DMC.</p>
@@ -6991,11 +6993,16 @@ details.hint[open] { margin-bottom: 4px; }
 <!-- o exemplo que a aba Fonte carrega; e o mesmo Arq_asm/nes-nave.asm -->
 <script type="text/plain" id="exemploAsm">
 ; =============================================================================
-; nes-nave.asm -- a mesma nave do nave.asm, agora no NES
+; nes-nave-1.asm -- a nave, agora atirando
 ;
-; Escrito para ser lido em par com o nave.asm do 2600: e o mesmo programa --
-; uma nave que anda com o controle, ceu, chao, mais nada -- nas duas maquinas.
-; Comparar os dois e a forma mais rapida de sentir a diferenca.
+; O que mudou do -0 para ca:
+;   * o botao A dispara um tiro (na pagina, a barra de espaco tambem)
+;   * um tiro por vez: so sai outro depois que o primeiro deixa a tela
+;   * o disparo e por borda, nao por botao pressionado -- segurar nao metralha
+;   * sprite 1 passou a ser o tiro, e o tile 3 e o desenho dele
+;
+; O -0 e o mesmo programa que o nave.asm do 2600, para os dois serem lidos em
+; par. Daqui em diante os numeros contam o que foi mudando.
 ;
 ; No 2600 voce desenha a tela linha a linha, contando ciclos, e o programa e o
 ; kernel. Aqui nao: a PPU desenha sozinha a partir do que voce deixou na
@@ -7030,8 +7037,11 @@ JOY1            = $4016
 JOY2            = $4017
 
 ; --- botoes, na ordem em que o controle entrega ------------------------------
+; O laco de leitura entrega o A primeiro e o Direita por ultimo, e cada um
+; entra por baixo -- entao o A acaba no bit de cima.
 BOTAO_DIREITA   = %00000001
 BOTAO_ESQUERDA  = %00000010
+BOTAO_A         = %10000000
 
 ; --- ajustes do jogo ---------------------------------------------------------
 NAVE_Y          = 180           ; altura em que a nave voa
@@ -7039,6 +7049,11 @@ NAVE_TILE       = 1             ; qual tile do CHR e a nave
 VELOCIDADE      = 2             ; pixels por quadro
 X_MIN           = 8
 X_MAX           = 240
+
+TIRO_TILE       = 3             ; qual tile do CHR e o tiro
+TIRO_VEL        = 4             ; sobe mais rapido do que a nave anda
+TIRO_TOPO       = 16            ; acima disto o tiro some
+TIRO_FORA       = 0             ; tiroY = 0 quer dizer "nenhum tiro na tela"
 
 CHAO            = $2000 + 26*32 ; onde na grade do fundo o chao comeca
 
@@ -7050,7 +7065,11 @@ CHAO            = $2000 + 26*32 ; onde na grade do fundo o chao comeca
 
 naveX           ds 1            ; coluna da nave
 botoes          ds 1            ; o que o controle 1 esta segurando
+antes           ds 1            ; o que ele segurava no quadro passado
+novos           ds 1            ; os que acabaram de ser apertados
 pronto          ds 1            ; a NMI avisa aqui que o quadro passou
+tiroX           ds 1            ; coluna do tiro
+tiroY           ds 1            ; linha do tiro; 0 = nao ha tiro
 
 ; A pagina 2 inteira e o rascunho dos 64 sprites: 4 bytes cada (y, tile,
 ; atributo, x). Uma vez por quadro ela e copiada para a PPU de um golpe so.
@@ -7140,7 +7159,9 @@ nmi     subroutine
 
         jsr lerControle
         jsr moverNave
-        jsr montarSprite
+        jsr atirar
+        jsr moverTiro
+        jsr montarSprites
 
         lda #0                  ; a rolagem se perde a cada quadro: reponha
         sta PPUSCROLL
@@ -7172,6 +7193,16 @@ lerControle subroutine
         rol botoes              ; e o carry entra por baixo em botoes
         dex
         bne .proximo
+
+        ; Quais botoes ACABARAM de ser apertados: os que estao ligados agora e
+        ; nao estavam antes. Sem isto, segurar o A metralharia -- um tiro por
+        ; quadro, sessenta por segundo.
+        lda antes
+        eor #$FF                ; ~antes
+        and botoes
+        sta novos
+        lda botoes
+        sta antes
         rts
 
 ; -----------------------------------------------------------------------------
@@ -7200,9 +7231,40 @@ moverNave subroutine
 .fim    rts
 
 ; -----------------------------------------------------------------------------
-; Monta o sprite 0 no rascunho: quatro bytes, nesta ordem
+; Dispara, se o A acabou de ser apertado e nao ha tiro na tela
 ; -----------------------------------------------------------------------------
-montarSprite subroutine
+atirar  subroutine
+        lda novos
+        and #BOTAO_A
+        beq .fim                ; nao apertou agora
+        lda tiroY
+        bne .fim                ; ja tem um tiro voando
+        lda naveX               ; sai do meio da nave
+        sta tiroX
+        lda #NAVE_Y - 6         ; e logo acima dela
+        sta tiroY
+.fim    rts
+
+; -----------------------------------------------------------------------------
+; Sobe o tiro, e o apaga quando chega no alto
+; -----------------------------------------------------------------------------
+moverTiro subroutine
+        lda tiroY
+        beq .fim                ; nao ha tiro
+        sec
+        sbc #TIRO_VEL
+        cmp #TIRO_TOPO
+        bcc .some
+        sta tiroY
+        rts
+.some   lda #TIRO_FORA
+        sta tiroY
+.fim    rts
+
+; -----------------------------------------------------------------------------
+; Monta os dois sprites no rascunho: quatro bytes cada, nesta ordem
+; -----------------------------------------------------------------------------
+montarSprites subroutine
         lda #NAVE_Y
         sta sprites+0           ; y
         lda #NAVE_TILE
@@ -7211,6 +7273,21 @@ montarSprite subroutine
         sta sprites+2           ; atributo: paleta 0, sem espelho
         lda naveX
         sta sprites+3           ; x
+
+        ; O tiro e o sprite 1. Sem tiro na tela, y = $FF o esconde -- e o mesmo
+        ; truque do esconderSprites.
+        lda tiroY
+        bne .tem
+        lda #$FF
+        sta sprites+4
+        rts
+.tem    sta sprites+4           ; y
+        lda #TIRO_TILE
+        sta sprites+5
+        lda #0
+        sta sprites+6
+        lda tiroX
+        sta sprites+7           ; x
         rts
 
 ; -----------------------------------------------------------------------------
@@ -7348,6 +7425,8 @@ paleta
         .byte %00011000
         .byte %00000000
 
+        ; tile 3 vem depois da grama, la embaixo.
+
         ; tile 2: grama. O plano de cima esta todo aceso, entao nenhum pixel
         ; cai na cor 0 (que seria o ceu vazando); o de baixo salpica os que
         ; sobem para a cor 3, o verde claro.
@@ -7367,6 +7446,26 @@ paleta
         .byte %11111111
         .byte %11111111
         .byte %11111111
+
+        ; tile 3: o tiro. So o plano de cima, entao ele sai inteiro na cor 2 --
+        ; que na paleta de sprites e o preto do contorno. Dois pixels de largura
+        ; no meio do tile, para sair do centro da nave.
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00011000
+        .byte %00011000
+        .byte %00011000
+        .byte %00011000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
 </script>
 
 <script>
@@ -10938,6 +11037,7 @@ document.addEventListener('fullscreenchange', updateFullscreenButton);
 const KEYS = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
   KeyZ: 'b', KeyX: 'a', Enter: 'start', ShiftLeft: 'select', ShiftRight: 'select',
+  Space: 'a',                       // o A tambem na barra: e o botao de acao
 };
 
 $('#btRun').addEventListener('click', () => {

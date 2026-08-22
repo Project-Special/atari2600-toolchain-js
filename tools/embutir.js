@@ -10,6 +10,9 @@
    acusa quando acontece. Este script e o conserto: roda e a copia volta a
    bater. As regioes sao delimitadas por marcas no proprio index.html.
 
+   Repoe tambem o exemplo que a aba Fonte carrega: e sempre o ultimo da serie
+   Arq_asm/nes-nave-N.asm, para o botao nunca trazer uma versao anterior.
+
        node tools/embutir.js            repoe o que estiver velho
        node tools/embutir.js --conferir so diz o que esta velho, sem gravar
 
@@ -61,6 +64,33 @@ function acharRegiao(texto, nome, alvo, novo) {
   return { de: c, ate: d + '\n})();'.length, tinhaMarca: false };
 }
 
+/* o ultimo da serie nes-nave-N.asm, que e o que a aba Fonte oferece */
+function exemploMaisNovo() {
+  const dir = path.join(AQUI, '..', 'Arq_asm');
+  let nomes = [];
+  try { nomes = fs.readdirSync(dir); } catch (err) { return null; }
+  const serie = nomes.filter(n => /^nes-nave-\d+\.asm$/i.test(n))
+    .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+  if (!serie.length) return null;
+  const nome = serie[serie.length - 1];
+  return { nome, texto: fs.readFileSync(path.join(dir, nome), 'utf8').replace(/\r\n/g, '\n') };
+}
+
+function reporExemplo(plano, soConferir) {
+  const ex = exemploMaisNovo();
+  if (!ex) { console.log('FALTA  nenhum Arq_asm/nes-nave-N.asm'); return { plano, mexeu: 0 }; }
+  const marca = /(<script type="text\/plain" id="exemploAsm">\n)([\s\S]*?)(<\/script>)/;
+  const m = marca.exec(plano);
+  if (!m) { console.log('FALTA  o <script id="exemploAsm"> não está no index.html'); return { plano, mexeu: 0 }; }
+  if (m[2] === ex.texto) {
+    console.log('ok     exemplo   ' + ex.nome + ' já está embutido');
+    return { plano, mexeu: 0 };
+  }
+  console.log((soConferir ? 'VELHO  ' : 'reposto') + ' exemplo   agora é ' + ex.nome);
+  if (soConferir) return { plano, mexeu: 1 };
+  return { plano: plano.replace(marca, (t, a, b, c) => a + ex.texto + c), mexeu: 1 };
+}
+
 function main() {
   const soConferir = process.argv.includes('--conferir');
   let pagina = fs.readFileSync(PAGINA, 'utf8');
@@ -96,6 +126,11 @@ function main() {
               plano.slice(m.index + m[0].length);
     }
   }
+
+  const r = reporExemplo(plano, soConferir);
+  plano = r.plano;
+  mexeu += r.mexeu;
+  if (!r.mexeu) ok++;
 
   if (!mexeu) { console.log(ok + ' cópia(s) em dia, nada a fazer'); return 0; }
   if (soConferir) { console.log(mexeu + ' cópia(s) velha(s) — rode sem --conferir'); return 1; }

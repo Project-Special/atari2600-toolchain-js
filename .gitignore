@@ -30,3 +30,7 @@ genemedic.asm
 # sua maquina: .nes de jogos comerciais, e a pasta Arq_nes.
 *.nes
 Arq_nes/
+
+# ...menos a serie de exemplos daqui, que e nossa e de dominio publico: vai
+# montada junto do fonte para dar de abrir e jogar sem montar nada.
+!Arq_asm/nes-nave-*.nes

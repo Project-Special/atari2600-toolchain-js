@@ -104,7 +104,11 @@ function build(asm, opts) {
     return null;
   }
 
-  const bin = path.join(out, stem + '.bin');
+  /* Fonte de NES sai como .nes, nao .bin: o arquivo ja tem cabecalho iNES e e
+     isso que emulador e editor esperam pela extensao. */
+  const ehNes = res.rom.length > 4 && res.rom[0] === 0x4e && res.rom[1] === 0x45 &&
+                res.rom[2] === 0x53 && res.rom[3] === 0x1a;
+  const bin = path.join(out, stem + (ehNes ? '.nes' : '.bin'));
   fs.writeFileSync(bin, Buffer.from(res.rom));
   fs.writeFileSync(path.join(out, stem + '.lst'), DASM.listingText(res));
   fs.writeFileSync(path.join(out, stem + '.sym'), DASM.symbolText(res));

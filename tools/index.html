@@ -1734,7 +1734,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 12:02';
+const APP_BUILD = '2026-08-22 13:34';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6712,6 +6712,7 @@ h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: u
   <span style="width:12px"></span>
   <button id="btRun" disabled>Rodar</button>
   <button id="btReset" disabled>Reiniciar</button>
+  <button id="btRecap" hidden>Recapturar tiles</button>
   <button id="btSound">Som ligado</button>
   <span style="width:12px"></span>
   <button id="btUndo" disabled>Desfazer</button>
@@ -8190,6 +8191,19 @@ $('#ver').textContent = 'v' + APP_BUILD.replace(/[^0-9]/g, '').slice(0, 12);
 let rom = null;          // o arquivo .nes inteiro, como veio
 let romName = '';
 let chrStart = 0, chrLen = 0, bankCount = 0;
+let prgStart = 0, prgLen = 0;
+/* Jogo com CHR-RAM nao traz tile no arquivo: ele monta os tiles em tempo de
+   execucao, copiando de algum lugar do PRG. Entao a gente roda o jogo, olha o
+   que ele montou, e procura esses 16 bytes dentro do PRG. Achou, da para
+   editar de verdade -- o que a gente grava sai no arquivo e vale na proxima
+   vez que o jogo montar o tile. */
+let chrRam = null;       // Uint8Array(8192): o que o jogo montou
+/* Um tile tem dois planos de bits de 8 bytes: o primeiro da o bit 0 da cor de
+   cada pixel, o segundo da o bit 1. Muito jogo guarda so um deles no PRG -- uma
+   fonte de texto de 1 bit por pixel, por exemplo -- e monta o outro na hora.
+   Por isso a procura e por plano, nao por tile inteiro. */
+let ramLo = null, ramHi = null;   // offset de cada plano no arquivo, ou -1
+let ramNota = null;                 // 0 = palpite solto, 2+ = evidencia forte
 let bank = 0;            // banco de 8K sendo mostrado
 let tile = -1;           // tile selecionado, absoluto dentro da CHR
 let ink = 1;             // cor 0..3 do pincel
@@ -8213,6 +8227,8 @@ function parseRom(bytes) {
     prg16k, chr8k,
     mapper: (flags7 & 0xf0) | (flags6 >> 4),
     mirroring: (flags6 & 8) ? 'quatro telas' : ((flags6 & 1) ? 'vertical' : 'horizontal'),
+    prgStart: 16 + trainer,
+    prgLen: prg16k * 16384,
     chrStart: 16 + trainer + prg16k * 16384,
     chrLen: chr8k * 8192,
   };
@@ -8224,6 +8240,12 @@ function openRom(bytes, name) {
   romName = name;
   chrStart = h.chrStart;
   chrLen = h.chrLen;
+  prgStart = h.prgStart;
+  prgLen = h.prgLen;
+  chrRam = null;
+  ramLo = null;
+  ramHi = null;
+  ramNota = null;
   bankCount = Math.max(1, h.chr8k);
   bank = 0;
   tile = -1;
@@ -8249,8 +8271,16 @@ function openRom(bytes, name) {
   $('#btRun').disabled = false;
   $('#btReset').disabled = false;
 
+  $('#btRecap').hidden = !!h.chrLen;
+
   if (!h.chrLen) {
-    say('esta ROM usa CHR-RAM: os tiles são montados pelo código, não há CHR para editar', true);
+    /* CHR-RAM: roda o jogo para ver o que ele monta, e acha no PRG */
+    const r = prepararChrRam(150);
+    say(name + ' usa CHR-RAM: o jogo monta os tiles em tempo de execução. Rodei ' +
+        'e procurei o desenho de cada um dentro do PRG — achei ' + r.fortes +
+        ' com evidência firme e ' + r.fracos + ' em cima de palpite, de ' + r.desenhados +
+        ' tiles na tela. Os esmaecidos o jogo monta comprimido. Edite e clique em ' +
+        'Rodar: quem confirma se pegou é o jogo.');
   } else {
     say(name + ' aberta — ' + (chrLen / 16) + ' tiles');
   }
@@ -8259,20 +8289,133 @@ function openRom(bytes, name) {
   updateDirty();
 }
 
-/* --- ler e escrever um pixel dentro da CHR --------------------------------- */
-const tileBase = t => chrStart + t * 16;
+/* --- CHR-RAM: rodar o jogo e achar os tiles no PRG ------------------------- */
+
+/* Roda o jogo em silencio por alguns quadros, so para ele montar os tiles. */
+function capturarChrRam(quadros) {
+  const t = NES.create();
+  t.load(rom);
+  for (let f = 0; f < (quadros || 150); f++) t.frame();
+  return new Uint8Array(t.chr);
+}
+
+/* Procura cada plano de 8 bytes dentro do PRG.
+
+   Oito bytes podem casar por acaso -- ate dentro do codigo do jogo. Por isso
+   nao basta achar: a gente pontua o candidato pela vizinhanca. Vale 2 se o
+   outro plano do mesmo tile estiver logo a frente (o arranjo normal de um tile
+   de 16 bytes) e mais 1 para cada tile vizinho no lugar esperado. Palpite sem
+   nenhuma dessas pistas costuma ser coincidencia -- em jogo que guarda os
+   tiles comprimidos, todos sao. */
+function localizarNoPrg(snapshot) {
+  const fim = prgStart + prgLen;
+
+  const indice = new Map();
+  for (let i = prgStart; i + 8 <= fim; i++) {
+    const k = rom[i] | (rom[i + 1] << 8) | (rom[i + 2] << 16) | (rom[i + 3] << 24);
+    let lista = indice.get(k);
+    if (!lista) indice.set(k, lista = []);
+    if (lista.length < 64) lista.push(i);
+  }
+
+  function candidatos(base) {
+    let liso = true;
+    for (let i = 1; i < 8; i++) if (snapshot[base + i] !== snapshot[base]) { liso = false; break; }
+    if (liso) return [];                        // plano chapado casa em todo lugar
+    const k = snapshot[base] | (snapshot[base + 1] << 8) |
+              (snapshot[base + 2] << 16) | (snapshot[base + 3] << 24);
+    const lista = indice.get(k);
+    if (!lista) return [];
+    const out = [];
+    for (const off of lista) {
+      let igual = true;
+      for (let i = 4; i < 8; i++) if (rom[off + i] !== snapshot[base + i]) { igual = false; break; }
+      if (igual) out.push(off);
+    }
+    return out;
+  }
+
+  const cLo = [], cHi = [];
+  for (let t = 0; t < BANK_TILES; t++) {
+    cLo[t] = candidatos(t * 16);
+    cHi[t] = candidatos(t * 16 + 8);
+  }
+
+  const tem = (lista, off) => !!lista && lista.indexOf(off) >= 0;
+  function escolher(lista, t, plano) {
+    if (!lista.length) return { off: -1, nota: 0 };
+    let melhor = lista[0], nota = 0;
+    for (const off of lista) {
+      let n = 0;
+      if (plano === 0 && tem(cHi[t], off + 8)) n += 2;
+      if (plano === 1 && tem(cLo[t], off - 8)) n += 2;
+      const passo = n >= 2 ? 16 : 8;
+      if (t > 0 && tem(plano ? cHi[t - 1] : cLo[t - 1], off - passo)) n += 1;
+      if (t < BANK_TILES - 1 && tem(plano ? cHi[t + 1] : cLo[t + 1], off + passo)) n += 1;
+      if (n > nota) { nota = n; melhor = off; }
+    }
+    return { off: melhor, nota };
+  }
+
+  const lo = new Int32Array(BANK_TILES).fill(-1);
+  const hi = new Int32Array(BANK_TILES).fill(-1);
+  const fe = new Uint8Array(BANK_TILES);
+  let fortes = 0, fracos = 0;
+  for (let t = 0; t < BANK_TILES; t++) {
+    const a = escolher(cLo[t], t, 0), b = escolher(cHi[t], t, 1);
+    lo[t] = a.off;
+    hi[t] = b.off;
+    fe[t] = Math.max(a.nota, b.nota);
+    if (a.off >= 0 || b.off >= 0) { if (fe[t] >= 2) fortes++; else fracos++; }
+  }
+  return { lo, hi, fe, fortes, fracos, achados: fortes + fracos };
+}
+
+function prepararChrRam(quadros) {
+  chrRam = capturarChrRam(quadros);
+  const r = localizarNoPrg(chrRam);
+  ramLo = r.lo;
+  ramHi = r.hi;
+  ramNota = r.fe;
+  let desenhados = 0;
+  for (let t = 0; t < BANK_TILES; t++) {
+    const b = t * 16;
+    for (let i = 0; i < 16; i++) if (chrRam[b + i]) { desenhados++; break; }
+  }
+  return { achados: r.achados, fortes: r.fortes, fracos: r.fracos, desenhados };
+}
+
+/* --- ler e escrever um pixel ------------------------------------------------
+   Com CHR no arquivo, o tile mora em chrStart + t*16. Com CHR-RAM, o desenho
+   vem do que o jogo montou, e a gravacao vai para onde ele copiou de dentro do
+   PRG -- se a gente tiver achado. */
+/* onde mora cada plano de um tile: com CHR no arquivo, os dois seguidos; com
+   CHR-RAM, onde a gente achou cada um -- ou lugar nenhum */
+function planoBase(t, plano) {
+  if (!chrRam) return chrStart + t * 16 + plano * 8;
+  return plano ? ramHi[t] : ramLo[t];
+}
+function editavel(t) { return planoBase(t, 0) >= 0 || planoBase(t, 1) >= 0; }
 
 function getPixel(t, x, y) {
-  const b = tileBase(t);
-  const lo = (rom[b + y] >> (7 - x)) & 1;
-  const hi = (rom[b + y + 8] >> (7 - x)) & 1;
-  return lo | (hi << 1);
+  let v = 0;
+  for (let plano = 0; plano < 2; plano++) {
+    const b = planoBase(t, plano);
+    const fonte = (b >= 0) ? rom : chrRam;
+    const o = (b >= 0) ? b : t * 16 + plano * 8;
+    v |= ((fonte[o + y] >> (7 - x)) & 1) << plano;
+  }
+  return v;
 }
 
 function setPixel(t, x, y, c) {
-  const b = tileBase(t), bit = 7 - x;
-  rom[b + y] = (rom[b + y] & ~(1 << bit)) | ((c & 1) << bit);
-  rom[b + y + 8] = (rom[b + y + 8] & ~(1 << bit)) | (((c >> 1) & 1) << bit);
+  const bit = 7 - x;
+  for (let plano = 0; plano < 2; plano++) {
+    const b = planoBase(t, plano);
+    if (b < 0) continue;                        // este plano nao esta no arquivo
+    rom[b + y] = (rom[b + y] & ~(1 << bit)) | (((c >> plano) & 1) << bit);
+    if (chrRam) chrRam[t * 16 + plano * 8 + y] = rom[b + y];
+  }
 }
 
 const rgb = i => '#' + NES.MASTER[i & 0x3f].toString(16).padStart(6, '0');
@@ -8288,14 +8431,14 @@ function drawGallery() {
   galCtx.imageSmoothingEnabled = false;
   galCtx.fillStyle = rgb(pal[0]);
   galCtx.fillRect(0, 0, gal.width, gal.height);
-  if (!rom || !chrLen) return;
+  if (!rom || (!chrLen && !chrRam)) return;
 
   const first = bank * BANK_TILES;
   const img = galCtx.createImageData(TILES_PER_ROW * 8, rows * 8);
   const data = img.data;
   for (let i = 0; i < BANK_TILES; i++) {
     const t = first + i;
-    if (tileBase(t) + 16 > rom.length) break;
+    if (!chrRam && chrStart + t * 16 + 16 > rom.length) break;
     const tx = (i % TILES_PER_ROW) * 8, ty = ((i / TILES_PER_ROW) | 0) * 8;
     for (let y = 0; y < 8; y++) {
       for (let x = 0; x < 8; x++) {
@@ -8309,6 +8452,22 @@ function drawGallery() {
   tmp.width = img.width; tmp.height = img.height;
   tmp.getContext('2d').putImageData(img, 0, 0);
   galCtx.drawImage(tmp, 0, 0, gal.width, gal.height);
+
+  /* Esmaece o que nao da para gravar, e poe um canto amarelo no que e palpite:
+     esses a gente achou por casamento de bytes solto, e pode nao pegar. */
+  if (chrRam) {
+    for (let i = 0; i < BANK_TILES; i++) {
+      const t = first + i;
+      const x = (i % TILES_PER_ROW) * 8 * GZ, y = ((i / TILES_PER_ROW) | 0) * 8 * GZ;
+      if (!editavel(t)) {
+        galCtx.fillStyle = 'rgba(13, 19, 25, 0.55)';
+        galCtx.fillRect(x, y, 8 * GZ, 8 * GZ);
+      } else if (ramNota && ramNota[t] < 2) {
+        galCtx.fillStyle = '#e8c04a';
+        galCtx.fillRect(x + 8 * GZ - 4, y, 4, 4);
+      }
+    }
+  }
 
   /* marca os alterados e o selecionado */
   for (const t of dirty) {
@@ -8329,7 +8488,7 @@ function drawGallery() {
 }
 
 gal.addEventListener('click', e => {
-  if (!rom || !chrLen) return;
+  if (!rom || (!chrLen && !chrRam)) return;
   const r = gal.getBoundingClientRect();
   const x = ((e.clientX - r.left) / (8 * GZ)) | 0;
   const y = ((e.clientY - r.top) / (8 * GZ)) | 0;
@@ -8348,7 +8507,7 @@ function drawGrid() {
   gridCtx.imageSmoothingEnabled = false;
   gridCtx.fillStyle = '#000';
   gridCtx.fillRect(0, 0, grid.width, grid.height);
-  if (tile < 0 || !rom || !chrLen) {
+  if (tile < 0 || !rom || (!chrLen && !chrRam)) {
     $('#tileInfo').textContent = 'nenhum tile aberto';
     return;
   }
@@ -8364,16 +8523,30 @@ function drawGrid() {
     gridCtx.beginPath(); gridCtx.moveTo(i * EZ + .5, 0); gridCtx.lineTo(i * EZ + .5, grid.height); gridCtx.stroke();
     gridCtx.beginPath(); gridCtx.moveTo(0, i * EZ + .5); gridCtx.lineTo(grid.width, i * EZ + .5); gridCtx.stroke();
   }
-  const b = tileBase(tile);
+  const b0 = planoBase(tile, 0), b1 = planoBase(tile, 1);
+  let onde;
+  if (b0 >= 0 && b1 >= 0) {
+    onde = ' · byte <b>$' + b0.toString(16).toUpperCase() + '</b> do arquivo' +
+           (chrRam && b1 !== b0 + 8 ? ' e <b>$' + b1.toString(16).toUpperCase() + '</b>' : '');
+  } else if (b0 >= 0 || b1 >= 0) {
+    onde = ' · só o plano ' + (b0 >= 0 ? '0' : '1') + ' está no arquivo (byte <b>$' +
+           (b0 >= 0 ? b0 : b1).toString(16).toUpperCase() + '</b>); o outro o jogo monta';
+  } else {
+    onde = ' · <b>só leitura</b>: não achei os bytes dele no PRG, o jogo deve montar comprimido';
+  }
   $('#tileInfo').innerHTML =
     'tile <b>' + tile + '</b> ($' + tile.toString(16).toUpperCase().padStart(3, '0') + ')' +
-    ' · byte <b>$' + b.toString(16).toUpperCase() + '</b> do arquivo' +
+    onde +
+    (chrRam && ramNota && ramNota[tile] > 0 && ramNota[tile] < 2
+      ? ' · <b>palpite</b>: casou por bytes soltos, pode não pegar — rode para ver'
+      : '') +
     (dirty.has(tile) ? ' · <b>alterado</b>' : '');
 }
 
 let painting = false;
 function paintAt(e) {
-  if (tile < 0 || !rom || !chrLen) return;
+  if (tile < 0 || !rom || (!chrLen && !chrRam)) return;
+  if (!editavel(tile)) return;
   const r = grid.getBoundingClientRect();
   const x = ((e.clientX - r.left) / (grid.clientWidth / 8)) | 0;
   const y = ((e.clientY - r.top) / (grid.clientHeight / 8)) | 0;
@@ -8388,6 +8561,7 @@ function paintAt(e) {
 
 grid.addEventListener('pointerdown', e => {
   if (tile < 0) return;
+  if (!editavel(tile)) { say('este tile é só leitura: não achei os 16 bytes dele no PRG', true); return; }
   pushUndo(tile);
   painting = true;
   grid.setPointerCapture(e.pointerId);
@@ -8397,8 +8571,13 @@ grid.addEventListener('pointermove', e => { if (painting) paintAt(e); });
 grid.addEventListener('pointerup', () => { painting = false; });
 
 function pushUndo(t) {
-  const b = tileBase(t);
-  undo.push({ tile: t, bytes: rom.slice(b, b + 16), wasDirty: dirty.has(t) });
+  if (!editavel(t)) return;
+  const planos = [];
+  for (let p = 0; p < 2; p++) {
+    const b = planoBase(t, p);
+    planos.push(b >= 0 ? rom.slice(b, b + 8) : null);
+  }
+  undo.push({ tile: t, planos, wasDirty: dirty.has(t) });
   if (undo.length > 200) undo.shift();
   $('#btUndo').disabled = false;
 }
@@ -8406,7 +8585,12 @@ function pushUndo(t) {
 $('#btUndo').addEventListener('click', () => {
   const u = undo.pop();
   if (!u) return;
-  rom.set(u.bytes, tileBase(u.tile));
+  for (let p = 0; p < 2; p++) {
+    const b = planoBase(u.tile, p);
+    if (b < 0 || !u.planos[p]) continue;
+    rom.set(u.planos[p], b);
+    if (chrRam) chrRam.set(u.planos[p], u.tile * 16 + p * 8);
+  }
   if (!u.wasDirty) dirty.delete(u.tile);
   tile = u.tile;
   $('#btUndo').disabled = undo.length === 0;
@@ -8562,6 +8746,27 @@ $('#btRun').addEventListener('click', () => {
 });
 
 $('#btReset').addEventListener('click', () => { if (nes) { nes.load(rom); say('reiniciado'); } });
+
+/* Com CHR-RAM, o jogo troca os tiles conforme a tela. Este botao pega o que
+   estiver montado agora -- no jogo que esta rodando, se houver. */
+$('#btRecap').addEventListener('click', () => {
+  if (!rom) return;
+  if (nes && running) {
+    chrRam = new Uint8Array(nes.chr);
+    const r = localizarNoPrg(chrRam);
+    ramLo = r.lo;
+    ramHi = r.hi;
+    ramNota = r.fe;
+    say('peguei os tiles da tela de agora — ' + r.fortes + ' com o desenho cru no PRG, ' +
+        r.fracos + ' em cima de palpite');
+  } else {
+    const r = prepararChrRam(150);
+    say('rodei o jogo de novo — ' + r.achados + ' dos ' + r.desenhados + ' tiles estão no PRG');
+  }
+  tile = -1;
+  drawGallery();
+  drawGrid();
+});
 
 function stop() {
   running = false;

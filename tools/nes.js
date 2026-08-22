@@ -142,7 +142,7 @@ const NES = (() => {
     function prgWrite(a, v) {
       switch (mapper) {
         case 1: mmc1Write(a, v); break;
-        case 2: setPrg16(0, v & 0x0f); break;             // UxROM
+        case 2: setPrg16(0, v); break;                    // UxROM (o prg8 ja da a volta)
         case 3: setChr8(v & 3); break;                    // CNROM
         case 4: mmc3Write(a, v); break;
         case 7:                                           // AxROM
@@ -965,6 +965,27 @@ const NES = (() => {
     const aIndY = w => { const z = rd(PC++); const b = rd(z) | (rd((z + 1) & 0xff) << 8);
                          const a = (b + Y) & 0xffff; if (w || ((b ^ a) & 0xff00)) tick(); return a; };
 
+    /* le, mexe e grava de volta, gastando o ciclo do meio como o hardware */
+    function rmw(a, f) {
+      let m = rd(a);
+      tick();
+      m = f(m) & 0xff;
+      wr(a, m);
+      return m;
+    }
+
+    /* o mesmo, para os deslocamentos, devolvendo o valor ja deslocado */
+    function shiftMem(a, kind) {
+      let m = rd(a);
+      tick();
+      if (kind === 'asl') { fC = (m >> 7) & 1; m = (m << 1) & 0xff; }
+      else if (kind === 'lsr') { fC = m & 1; m >>= 1; }
+      else if (kind === 'rol') { const c = fC; fC = (m >> 7) & 1; m = ((m << 1) | c) & 0xff; }
+      else { const c = fC; fC = m & 1; m = (m >> 1) | (c << 7); }
+      wr(a, m);
+      return m;
+    }
+
     function branch(take) {
       const off = rd(PC++);
       if (!take) return;
@@ -1211,6 +1232,134 @@ const NES = (() => {
         case 0xd8: fD = 0; tick(); break;
         case 0xf8: fD = 1; tick(); break;
         case 0xea: tick(); break;
+
+
+        /* --- opcodes nao documentados -----------------------------------
+           O 6502 tem dezenas de combinacoes sem nome oficial: a maioria faz
+           duas coisas de uma vez (mexe na memoria e no acumulador no mesmo
+           gesto) e sai mais barata em byte e em ciclo. Jogo pequeno usa, e
+           sem elas a CPU descarrilha. Sao as mesmas que o montador daqui
+           aceita, com os mesmos opcodes.
+           ---------------------------------------------------------------- */
+        case 0x1a: case 0x3a: case 0x5a: case 0x7a: case 0xda: case 0xfa:
+          tick(); break;                                     // NOP sem operando
+        case 0x80: case 0x82: case 0x89: case 0xc2: case 0xe2:
+          rd(aImm()); break;                                 // NOP imediato
+        case 0x04: case 0x44: case 0x64: rd(aZp()); break;    // NOP zero page
+        case 0x14: case 0x34: case 0x54: case 0x74: case 0xd4: case 0xf4:
+          rd(aZpX()); break;
+        case 0x0c: rd(aAbs()); break;
+        case 0x1c: case 0x3c: case 0x5c: case 0x7c: case 0xdc: case 0xfc:
+          rd(aAbsX(0)); break;
+
+        /* LAX: carrega A e X de uma vez */
+        case 0xa7: A = X = rd(aZp()); setZN(A); break;
+        case 0xb7: A = X = rd(aZpY()); setZN(A); break;
+        case 0xaf: A = X = rd(aAbs()); setZN(A); break;
+        case 0xbf: A = X = rd(aAbsY(0)); setZN(A); break;
+        case 0xa3: A = X = rd(aIndX()); setZN(A); break;
+        case 0xb3: A = X = rd(aIndY(0)); setZN(A); break;
+
+        /* SAX: guarda A e X juntos, sem mexer em bandeira */
+        case 0x87: wr(aZp(), A & X); break;
+        case 0x97: wr(aZpY(), A & X); break;
+        case 0x8f: wr(aAbs(), A & X); break;
+        case 0x83: wr(aIndX(), A & X); break;
+
+        /* DCP: decrementa a memoria e compara com A */
+        case 0xc7: a = aZp(); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xd7: a = aZpX(); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xcf: a = aAbs(); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xdf: a = aAbsX(1); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xdb: a = aAbsY(1); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xc3: a = aIndX(); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+        case 0xd3: a = aIndY(1); m = rmw(a, x => x - 1); cmpReg(A, m); break;
+
+        /* ISB: incrementa a memoria e subtrai de A */
+        case 0xe7: a = aZp(); sbc(rmw(a, x => x + 1)); break;
+        case 0xf7: a = aZpX(); sbc(rmw(a, x => x + 1)); break;
+        case 0xef: a = aAbs(); sbc(rmw(a, x => x + 1)); break;
+        case 0xff: a = aAbsX(1); sbc(rmw(a, x => x + 1)); break;
+        case 0xfb: a = aAbsY(1); sbc(rmw(a, x => x + 1)); break;
+        case 0xe3: a = aIndX(); sbc(rmw(a, x => x + 1)); break;
+        case 0xf3: a = aIndY(1); sbc(rmw(a, x => x + 1)); break;
+
+        /* SLO: desloca a memoria para a esquerda e faz OR com A */
+        case 0x07: a = aZp(); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x17: a = aZpX(); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x0f: a = aAbs(); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x1f: a = aAbsX(1); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x1b: a = aAbsY(1); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x03: a = aIndX(); A |= shiftMem(a, 'asl'); setZN(A); break;
+        case 0x13: a = aIndY(1); A |= shiftMem(a, 'asl'); setZN(A); break;
+
+        /* RLA: gira a memoria para a esquerda e faz AND com A */
+        case 0x27: a = aZp(); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x37: a = aZpX(); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x2f: a = aAbs(); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x3f: a = aAbsX(1); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x3b: a = aAbsY(1); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x23: a = aIndX(); A &= shiftMem(a, 'rol'); setZN(A); break;
+        case 0x33: a = aIndY(1); A &= shiftMem(a, 'rol'); setZN(A); break;
+
+        /* SRE: desloca a memoria para a direita e faz XOR com A */
+        case 0x47: a = aZp(); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x57: a = aZpX(); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x4f: a = aAbs(); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x5f: a = aAbsX(1); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x5b: a = aAbsY(1); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x43: a = aIndX(); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+        case 0x53: a = aIndY(1); A ^= shiftMem(a, 'lsr'); setZN(A); break;
+
+        /* RRA: gira a memoria para a direita e soma em A */
+        case 0x67: a = aZp(); adc(shiftMem(a, 'ror')); break;
+        case 0x77: a = aZpX(); adc(shiftMem(a, 'ror')); break;
+        case 0x6f: a = aAbs(); adc(shiftMem(a, 'ror')); break;
+        case 0x7f: a = aAbsX(1); adc(shiftMem(a, 'ror')); break;
+        case 0x7b: a = aAbsY(1); adc(shiftMem(a, 'ror')); break;
+        case 0x63: a = aIndX(); adc(shiftMem(a, 'ror')); break;
+        case 0x73: a = aIndY(1); adc(shiftMem(a, 'ror')); break;
+
+        /* os de operando imediato */
+        case 0x0b: case 0x2b:                                 // ANC
+          A &= rd(aImm()); setZN(A); fC = (A >> 7) & 1; break;
+        case 0x4b:                                            // ASR
+          A &= rd(aImm()); fC = A & 1; A >>= 1; setZN(A); break;
+        case 0x6b: {                                          // ARR
+          A &= rd(aImm());
+          A = ((A >> 1) | (fC << 7)) & 0xff;
+          setZN(A);
+          fC = (A >> 6) & 1;
+          fV = ((A >> 6) ^ (A >> 5)) & 1;
+          break;
+        }
+        case 0xcb: {                                          // SBX
+          const n = rd(aImm());
+          const r = (A & X) - n;
+          fC = (A & X) >= n ? 1 : 0;
+          X = r & 0xff;
+          setZN(X);
+          break;
+        }
+        case 0xab: A = X = rd(aImm()); setZN(A); break;        // LXA
+        case 0x8b: A = X & rd(aImm()); setZN(A); break;        // ANE
+
+        /* os que misturam registrador com o byte alto do endereco */
+        case 0xbb: {                                          // LAS
+          const n = rd(aAbsY(0)) & S;
+          A = X = S = n; setZN(A); break;
+        }
+        case 0x9b: S = A & X; a = aAbsY(1); wr(a, S & ((a >> 8) + 1)); break;   // SHS
+        case 0x9f: a = aAbsY(1); wr(a, A & X & ((a >> 8) + 1)); break;          // SHA
+        case 0x93: a = aIndY(1); wr(a, A & X & ((a >> 8) + 1)); break;
+        case 0x9e: a = aAbsY(1); wr(a, X & ((a >> 8) + 1)); break;              // SHX
+        case 0x9c: a = aAbsX(1); wr(a, Y & ((a >> 8) + 1)); break;              // SHY
+
+        /* KIL: trava a CPU de verdade. Aqui so nao anda, para nao rodar em
+           falso -- e o sinal de que o programa se perdeu. */
+        case 0x02: case 0x12: case 0x22: case 0x32: case 0x42: case 0x52:
+        case 0x62: case 0x72: case 0x92: case 0xb2: case 0xd2: case 0xf2:
+          PC--; tick(); unknownOps[op] = (unknownOps[op] || 0) + 1; break;
 
         default:
           unknownOps[op] = (unknownOps[op] || 0) + 1;

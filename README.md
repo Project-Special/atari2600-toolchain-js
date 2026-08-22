@@ -76,7 +76,8 @@ do `WSYNC` no ciclo certo.
 `tools/nes.js` é um Nintendo Entertainment System escrito do zero, no mesmo
 desenho do emulador de 2600: o relógio de vídeo manda e a CPU anda pendurada
 nele — 3 pontos de PPU por ciclo de CPU, 341 pontos por scanline, 262
-scanlines por quadro.
+scanlines por quadro. A CPU tem os opcodes não documentados, que homebrew
+pequeno usa bastante para economizar byte.
 
 A PPU tem o pipeline de verdade, não uma aproximação por scanline: os quatro
 buscas em oito pontos, os registradores de deslocamento, e os incrementos do

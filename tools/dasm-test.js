@@ -10,9 +10,9 @@
 
    Os fontes testados sao todos os .asm da raiz e de Arq_asm/.
 
-   Também confere as duas cópias que vivem embutidas: o vcs.h/macro.h dentro do
-   dasm.js e o dasm.js inteiro dentro do sprite-editor.html. Sai com status 1 se
-   algo divergir.
+   Também confere as cópias que vivem embutidas: o vcs.h/macro.h dentro do
+   dasm.js, e o dasm.js, o vcs.js e o nes.js inteiros dentro do index.html.
+   Sai com status 1 se algo divergir.
    ========================================================================== */
 
 'use strict';
@@ -89,7 +89,9 @@ function checkEmbedded() {
     }
   }
 
-  const page = fs.readFileSync(path.join(ROOT, 'tools', 'sprite-editor.html'), 'utf8');
+  /* os editores moram todos no index.html da raiz, cada um dentro de um
+     <template>; e la que as copias embutidas tem que estar em dia */
+  const page = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 
   // a tabela NTSC vive duas vezes: no palette.js e dentro da página
   const inPage = /const NTSC = \[([\s\S]*?)\];/.exec(page);
@@ -97,22 +99,23 @@ function checkEmbedded() {
   const { NTSC } = require('./palette.js');
   if (fromPage.length !== NTSC.length || fromPage.some((v, i) => v !== NTSC[i])) {
     bad++;
-    console.log('DIFERE a paleta NTSC do palette.js não bate com a do sprite-editor.html');
+    console.log('DIFERE a paleta NTSC do palette.js não bate com a do index.html');
   } else {
-    console.log('ok     palette.js   NTSC igual à da página (' + NTSC.length + ' cores)');
+    console.log('ok     palette.js   NTSC igual à do index.html (' + NTSC.length + ' cores)');
   }
 
-  // dasm.js e vcs.js vivem inteiros dentro da página, sem a linha do module.exports
-  for (const name of ['dasm.js', 'vcs.js']) {
+  // dasm.js, vcs.js e nes.js vivem inteiros dentro do index.html, cada um sem a
+  // sua linha final de module.exports
+  for (const name of ['dasm.js', 'vcs.js', 'nes.js']) {
     const mod = fs.readFileSync(path.join(ROOT, 'tools', name), 'utf8')
       .replace(/\r\n/g, '\n')
       .replace(/\nif \(typeof module[^\n]*\n/, '\n')
       .trim();
     if (!page.replace(/\r\n/g, '\n').includes(mod)) {
       bad++;
-      console.log('DIFERE ' + name + ' embutido no sprite-editor.html está velho — reembuta a versão nova');
+      console.log('DIFERE ' + name + ' embutido no index.html está velho — reembuta a versão nova');
     } else {
-      console.log('ok     ' + name.padEnd(12) + ' embutido igual no sprite-editor.html');
+      console.log('ok     ' + name.padEnd(12) + ' embutido igual no index.html');
     }
   }
   return bad;

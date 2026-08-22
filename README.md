@@ -4,19 +4,24 @@ Montador, emuladores e editores para **Atari 2600** e **NES** — tudo em
 JavaScript, sem nada instalado, cada editor numa página que abre direto no
 navegador. Nenhuma chamada de rede, nenhum servidor, nenhum executável.
 
-Uma porta só: o **[index.html](index.html)** tem o seletor de console no topo e
-carrega o editor escolhido. Ele lembra o último que você usou, e o endereço
-aceita `#atari` ou `#nes` para abrir direto num deles.
+Um arquivo só: **[index.html](index.html)**. Ele tem o seletor de console no
+topo e os dois editores inteiros dentro, cada um guardado num `<template>`:
 
-- **[Editor Emulador Atari](tools/sprite-editor.html)** — lê o `.asm`, mostra
-  cada tabela `.byte` como sprite, monta o fonte e roda a ROM ali mesmo.
-- **[Editor Emulador NES](tools/nes-editor.html)** — abre um `.nes`, lista os
-  tiles da CHR, deixa desenhar por cima, grava o arquivo de volta e roda o jogo
-  com o que você mudou.
+- **Editor Emulador Atari** — lê o `.asm`, mostra cada tabela `.byte` como
+  sprite, monta o fonte e roda a ROM ali mesmo.
+- **Editor Emulador NES** — abre um `.nes`, lista os tiles da CHR, deixa
+  desenhar por cima, grava o arquivo de volta e roda o jogo com o que você
+  mudou.
 
-Cada um continua sendo uma página inteira por conta própria: a casca só troca a
-moldura. É de propósito — os dois definem `$`, `say`, `toast` e afins, e juntos
-no mesmo escopo um pisaria no outro.
+Ao escolher um console, o conteúdo do template vai para uma moldura pelo
+`srcdoc`. São documentos separados de propósito — os dois editores definem `$`,
+`say`, `toast` e uma pilha de outros nomes, e no mesmo escopo um pisaria no
+outro. Como o `srcdoc` herda a origem da página, o editor lá dentro continua
+com acesso a arquivo: o `Ctrl+S` grava por cima do `.asm`, mesmo abrindo o
+arquivo direto do disco.
+
+O endereço aceita `#atari` e `#nes` para abrir direto num deles, e ele lembra o
+último que você usou.
 
 ![o editor](https://img.shields.io/badge/roda%20em-um%20arquivo%20HTML-blue)
 
@@ -24,14 +29,12 @@ no mesmo escopo um pisaria no outro.
 
 | Ferramenta | Arquivo | O que faz |
 |---|---|---|
-| Casca com os dois | `index.html` | escolhe o console e carrega o editor |
-| Editor de sprites | `tools/sprite-editor.html` | página única: desenho, código-fonte, montador e emulador |
+| Os editores | `index.html` | arquivo único: os dois consoles, com montador e emuladores dentro |
 | Montador | `tools/dasm.js` | monta 6502 falando o dialeto do DASM, no navegador ou no Node |
 | Emulador | `tools/vcs.js` | núcleo próprio: CPU 6507, TIA e RIOT em lockstep com o color clock |
 | Compilar pelo terminal | `tools/build.js` | grava `.bin`, `.lst` e `.sym` |
 | Sprite ↔ PNG | `tools/sprite.js` | tabela `.byte` para PNG e de volta, em lote |
 | Paletas do TIA | `tools/palette.js` | NTSC e PAL em JS, e gera o `.gpl` do LibreSprite/GIMP |
-| Editor de NES | `tools/nes-editor.html` | página única: tiles da CHR, edição, gravação do `.nes` e emulador |
 | Emulador de NES | `tools/nes.js` | CPU 2A03, PPU 2C02 e os mappers 0, 1, 2, 3 e 7 |
 | Testes | `tools/dasm-test.js`, `tools/vcs-test.js`, `tools/nes-test.js` | conferem montador e os dois emuladores |
 
@@ -62,6 +65,11 @@ DASM não conhece continua sendo recusado aqui.
 
 `vcs.h` e `macro.h` vão embutidos no arquivo, então a página monta um fonte que
 os inclui mesmo aberta de um `file://`.
+
+O `dasm.js`, o `vcs.js`, o `nes.js` e a paleta vivem duas vezes: como arquivo em
+`tools/`, para o Node e para os testes, e copiados inteiros dentro do
+`index.html`, para a página não depender de nada. O `dasm-test.js` compara as
+duas cópias e reclama quando uma fica para trás.
 
 **Conferido:** `node tools/dasm-test.js` monta cada `.asm` da raiz e de
 `Arq_asm/` com o montador daqui e com o `dasm.exe`, e compara byte a byte e

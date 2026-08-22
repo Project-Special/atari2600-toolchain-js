@@ -11,7 +11,7 @@
        node tools/sprite.js export Arq_asm/riverraid.asm --lines 2816-2833 -o jet.png
        node tools/sprite.js import jet.png
 
-   O editor (tools/sprite-editor.html) faz o mesmo de forma visual: arraste o
+   O editor (index.html) faz o mesmo de forma visual: arraste o
    PNG para a página, ou Arquivo > Exportar sprite em PNG. Isto aqui é para
    quando você quer fazer em lote ou dentro de um script.
 

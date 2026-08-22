@@ -294,6 +294,87 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     const pc = () => (seg.rpc === null ? seg.pc : seg.rpc) & 0xffff;
 
+    /* --- modo NES ---------------------------------------------------------
+
+       O 2600 e simples: o cartucho e exatamente o que a CPU enxerga, entao
+       montar e so preencher um pedaco do espaco de 64K. No NES nao da: o
+       arquivo tem cabecalho na frente, os tiles atras, e dois bancos de PRG
+       moram no mesmo $8000 -- gravar por endereco de CPU faria um sobrescrever
+       o outro.
+
+       Entao no modo NES o que anda e a posicao no arquivo, e o endereco de CPU
+       vira so o que os rotulos enxergam (o rpc que o RORG ja usava). O ORG
+       continua recebendo endereco de CPU, como a pessoa espera; quem traduz
+       para posicao no arquivo e o banco escolhido.
+
+       O alcance e o de um arquivo inteiro de ate 64K -- NROM, mapper 0, 16 ou
+       32K de PRG mais 8K de CHR. E onde todo mundo comeca, e e o que cabe
+       neste modelo sem mentir. */
+    let nes = null;                    // { prg, chr, mapper, mirror, banco, tipo }
+
+    const nesJanela = b =>
+      nes.prg === 1 ? 0xc000 : (b === nes.prg - 1 ? 0xc000 : 0x8000 + b * 0x4000);
+
+    /* endereco que a maquina ve -> posicao dele dentro do arquivo */
+    function nesArquivo(addr) {
+      if (nes.tipo === 'chr') {
+        return 16 + nes.prg * 0x4000 + nes.banco * 0x2000 + (addr & 0x1fff);
+      }
+      return 16 + nes.banco * 0x4000 + ((addr - nesJanela(nes.banco)) & 0xffff);
+    }
+
+    function nesTamanho() { return 16 + nes.prg * 0x4000 + nes.chr * 0x2000; }
+
+    function doInes(operand) {
+      const opc = { prg: 1, chr: 1, mapper: 0, mirror: 'h' };
+      for (const par of operand.split(/[\s,]+/)) {
+        if (!par.trim()) continue;
+        const m = /^\s*(\w+)\s*=\s*(.+?)\s*$/.exec(par);
+        if (!m) throw new AsmError('INES: esperado nome=valor, veio «' + par.trim() + '»');
+        const chave = m[1].toLowerCase();
+        if (!(chave in opc)) {
+          throw new AsmError('INES: não conheço «' + chave + '» (use prg, chr, mapper, mirror)');
+        }
+        opc[chave] = chave === 'mirror' ? m[2].trim().toLowerCase() : ev(m[2]).value;
+      }
+      if (opc.prg < 1 || opc.prg > 2) {
+        throw new AsmError('INES: prg=' + opc.prg + ' — este montador cobre 1 ou 2 bancos de 16K');
+      }
+      if (opc.chr < 0 || opc.chr > 1) {
+        throw new AsmError('INES: chr=' + opc.chr + ' — 0 (CHR-RAM) ou 1 banco de 8K');
+      }
+      if (!/^[hv]/.test(opc.mirror)) {
+        throw new AsmError('INES: mirror=' + opc.mirror + ' — use h (horizontal) ou v (vertical)');
+      }
+      nes = { prg: opc.prg, chr: opc.chr, mapper: opc.mapper & 0xff,
+              mirror: opc.mirror[0], banco: 0, tipo: 'prg' };
+      seg.pc = 0;
+      seg.rpc = null;
+      /* O preenchimento padrao do DASM e $FF, que e o certo para EPROM apagada.
+         Aqui nao serve: tile que ninguem escreveu ficaria todo aceso, e a
+         galeria nasceria com 256 quadrados pintados. Zero e o que os montadores
+         de NES usam. Um segundo argumento no ORG continua mandando mais. */
+      filler = 0;
+      const flags6 = ((nes.mapper & 0x0f) << 4) | (nes.mirror === 'v' ? 1 : 0);
+      const cab = [0x4e, 0x45, 0x53, 0x1a, nes.prg, nes.chr, flags6, nes.mapper & 0xf0,
+                   0, 0, 0, 0, 0, 0, 0, 0];
+      for (const b of cab) emit(b);
+    }
+
+    function doBank(operand, tipo) {
+      const nome = tipo === 'chr' ? 'CHRBANK' : 'BANK';
+      if (!nes) throw new AsmError(nome + ': falta o INES antes');
+      const b = ev(operand).value;
+      const quantos = tipo === 'chr' ? nes.chr : nes.prg;
+      if (b < 0 || b >= quantos) {
+        throw new AsmError('banco ' + b + ' não existe: o cabeçalho declarou ' + quantos);
+      }
+      nes.tipo = tipo;
+      nes.banco = b;
+      seg.rpc = tipo === 'chr' ? 0 : nesJanela(b);
+      seg.pc = nesArquivo(seg.rpc);
+    }
+
     function step(n) {
       seg.pc = (seg.pc + n) & 0xffff;
       if (seg.rpc !== null) seg.rpc = (seg.rpc + n) & 0xffff;
@@ -551,6 +632,26 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
       const parts = splitArgs(operand);
       const target = ev(parts[0]).value & 0xffff;
       if (parts.length > 1) filler = ev(parts[1]).value & 0xff;
+
+      /* no modo NES o ORG recebe endereco de CPU, mas quem anda e o arquivo */
+      if (nes && !seg.uninit) {
+        const destino = nesArquivo(target);
+        const limite = nes.tipo === 'chr'
+          ? 16 + nes.prg * 0x4000 + (nes.banco + 1) * 0x2000
+          : 16 + (nes.banco + 1) * 0x4000;
+        if (destino < 16 || destino > limite) {
+          throw new AsmError('ORG $' + (target >>> 0).toString(16).toUpperCase() +
+            ' cai fora do banco ' + nes.banco + ' — troque de banco antes');
+        }
+        if (seg.started && destino > seg.pc) {
+          while (seg.pc < destino) emit(filler);      // o buraco vira preenchimento
+        } else {
+          seg.pc = destino;
+        }
+        seg.rpc = target;
+        return;
+      }
+
       if (!seg.uninit && seg.started && target > seg.pc) {
         while (seg.pc < target) emit(filler);
       } else {
@@ -765,6 +866,10 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
           break;
         }
 
+        case 'ines':     doInes(operand); break;
+        case 'bank':     doBank(operand, 'prg'); break;
+        case 'chrbank':  doBank(operand, 'chr'); break;
+
         case 'org':   doOrg(operand); break;
         case 'rorg':  seg.rpc = ev(operand, 'RORG').value & 0xffff; break;
         case 'rend':  seg.rpc = null; break;
@@ -875,7 +980,14 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     /* --- resultado ----------------------------------------------------------- */
     let rom = new Uint8Array(0);
-    if (minA >= 0) {
+    if (nes) {
+      /* o .nes tem tamanho declarado no proprio cabecalho: o que a pessoa nao
+         escreveu sai preenchido, senao o arquivo nasce truncado */
+      rom = new Uint8Array(nesTamanho());
+      rom.fill(filler);
+      for (let a = 0; a < rom.length; a++) if (used[a]) rom[a] = mem[a];
+      minA = 0;
+    } else if (minA >= 0) {
       rom = new Uint8Array(maxA - minA + 1);
       for (let a = minA; a <= maxA; a++) rom[a - minA] = used[a] ? mem[a] : filler;
     }

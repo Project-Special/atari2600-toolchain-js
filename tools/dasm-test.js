@@ -35,16 +35,32 @@ const DEFINES = {
 
 /* Monta todo .asm que estiver na raiz e em Arq_asm/. O repositorio traz os
    exemplos originais (barras, nave, dialeto); se voce tiver outros fontes na
-   sua copia -- disassemblies, jogos seus -- eles entram no teste sozinhos. */
+   sua copia -- disassemblies, jogos seus -- eles entram no teste sozinhos.
+
+   Fora os de NES: ines, bank e chrbank sao extensao deste montador, e o DASM de
+   verdade nao as conhece -- comparar os dois byte a byte seria comparar com um
+   erro de sintaxe. Quem confere esses e o nes-test.js, que monta o exemplo e
+   joga com ele. */
+const ehNes = arquivo => {
+  try { return /^\s*ines\s/mi.test(fs.readFileSync(path.join(ROOT, arquivo), 'utf8')); }
+  catch (err) { return false; }
+};
+
 function acharFontes() {
-  const achados = [];
+  const achados = [], nes = [];
   for (const dir of ['Arq_asm', '.']) {
     const cheio = path.join(ROOT, dir);
     let nomes = [];
     try { nomes = fs.readdirSync(cheio); } catch (err) { continue; }
     for (const n of nomes.sort()) {
-      if (/\.asm$/i.test(n)) achados.push(path.join(dir, n).replace(/\\/g, '/'));
+      if (!/\.asm$/i.test(n)) continue;
+      const rel = path.join(dir, n).replace(/\\/g, '/');
+      (ehNes(rel) ? nes : achados).push(rel);
     }
+  }
+  for (const n of nes) {
+    console.log('pula   ' + path.basename(n, '.asm').padEnd(12) +
+                ' é de NES: o dasm.exe não tem as diretivas (vai no nes-test.js)');
   }
   return achados;
 }

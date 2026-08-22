@@ -53,7 +53,12 @@ node tools/nes-test.js                 # testa o emulador de NES
 `RORG`/`REND`, `ALIGN`, `DC`/`DS`/`HEX` em `.b`/`.w`/`.l`, `EQU`/`=`/`SET`/`EQM`,
 `SUBROUTINE` com rótulos locais, `MAC`/`ENDM`/`MEXIT` com `{1}`…`{9}`,
 `REPEAT`/`REPEND`, `IF`/`IFCONST`/`IFNCONST`/`ELSE`/`ENDIF`, `ECHO`, `ERR`,
-`INCBIN` e `END`. As expressões têm a mesma precedência, incluindo `<`/`>` de
+`INCBIN` e `END`. Para o NES vão três diretivas que o DASM não tem: `INES`
+escreve o cabeçalho e declara os bancos, `BANK` e `CHRBANK` escolhem para onde
+os bytes seguintes vão. A partir daí o `ORG` continua recebendo endereço de
+CPU — quem traduz para posição no arquivo é o banco escolhido. Cobre NROM:
+mapper 0, 16 ou 32K de código e 8K de tiles. As expressões têm a mesma
+precedência, incluindo `<`/`>` de
 byte baixo/alto, `.` e `*` como PC atual, `[ ]` como parênteses e
 `%1010`/`$ff`/`'c`. Faz vários passes até a tabela de símbolos parar de mudar,
 então referência para a frente vira zero page quando cabe.
@@ -142,6 +147,13 @@ Três fontes originais, em domínio público, em `Arq_asm/`:
 | `barras.asm` | o menor kernel que dá imagem estável: uma cor por scanline, varrendo a paleta, escorregando a cada quadro |
 | `nave.asm` | um sprite que anda com o joystick — posicionamento horizontal, playfield espelhado, kernel de linha única. A tabela `.byte` dele abre na galeria do editor |
 | `dialeto.asm` | não é jogo: passa por todo canto do montador (macro com argumento, `REPEAT`, condicional, `RORG`, `SET`, `EQM`, rótulo local, opcode não documentado) para o teste ter o que comparar |
+| `nes-nave.asm` | o `nave.asm` refeito para o NES, para os dois serem lidos em par: o mesmo jogo, e a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar. É o exemplo que a aba Fonte carrega |
+
+O `nes-nave.asm` não entra na comparação contra o `dasm.exe` — as diretivas de
+NES são extensão daqui, e o DASM de verdade as recusaria. Quem confere aquele é
+o `nes-test.js`, que monta o fonte e joga com ele: confere o cabeçalho, o vetor
+de reset, a cor do céu e do chão, e que a nave anda com o controle e para na
+borda.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o

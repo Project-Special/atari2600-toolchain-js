@@ -1734,7 +1734,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 17:03';
+const APP_BUILD = '2026-08-22 17:19';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -3440,6 +3440,7 @@ $('#toSprite').addEventListener('click', () => {
   selectTable(hit);
 });
 
+/* @embutido dasm.js em src-atari */
 /* ==========================================================================
    DASM.js — montador 6502 compatível com o DASM, escrito para o TIA Sprite
    Bench. Roda no navegador: o editor compila sem precisar de ajudante externo.
@@ -3736,6 +3737,87 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     const pc = () => (seg.rpc === null ? seg.pc : seg.rpc) & 0xffff;
 
+    /* --- modo NES ---------------------------------------------------------
+
+       O 2600 e simples: o cartucho e exatamente o que a CPU enxerga, entao
+       montar e so preencher um pedaco do espaco de 64K. No NES nao da: o
+       arquivo tem cabecalho na frente, os tiles atras, e dois bancos de PRG
+       moram no mesmo $8000 -- gravar por endereco de CPU faria um sobrescrever
+       o outro.
+
+       Entao no modo NES o que anda e a posicao no arquivo, e o endereco de CPU
+       vira so o que os rotulos enxergam (o rpc que o RORG ja usava). O ORG
+       continua recebendo endereco de CPU, como a pessoa espera; quem traduz
+       para posicao no arquivo e o banco escolhido.
+
+       O alcance e o de um arquivo inteiro de ate 64K -- NROM, mapper 0, 16 ou
+       32K de PRG mais 8K de CHR. E onde todo mundo comeca, e e o que cabe
+       neste modelo sem mentir. */
+    let nes = null;                    // { prg, chr, mapper, mirror, banco, tipo }
+
+    const nesJanela = b =>
+      nes.prg === 1 ? 0xc000 : (b === nes.prg - 1 ? 0xc000 : 0x8000 + b * 0x4000);
+
+    /* endereco que a maquina ve -> posicao dele dentro do arquivo */
+    function nesArquivo(addr) {
+      if (nes.tipo === 'chr') {
+        return 16 + nes.prg * 0x4000 + nes.banco * 0x2000 + (addr & 0x1fff);
+      }
+      return 16 + nes.banco * 0x4000 + ((addr - nesJanela(nes.banco)) & 0xffff);
+    }
+
+    function nesTamanho() { return 16 + nes.prg * 0x4000 + nes.chr * 0x2000; }
+
+    function doInes(operand) {
+      const opc = { prg: 1, chr: 1, mapper: 0, mirror: 'h' };
+      for (const par of operand.split(/[\s,]+/)) {
+        if (!par.trim()) continue;
+        const m = /^\s*(\w+)\s*=\s*(.+?)\s*$/.exec(par);
+        if (!m) throw new AsmError('INES: esperado nome=valor, veio «' + par.trim() + '»');
+        const chave = m[1].toLowerCase();
+        if (!(chave in opc)) {
+          throw new AsmError('INES: não conheço «' + chave + '» (use prg, chr, mapper, mirror)');
+        }
+        opc[chave] = chave === 'mirror' ? m[2].trim().toLowerCase() : ev(m[2]).value;
+      }
+      if (opc.prg < 1 || opc.prg > 2) {
+        throw new AsmError('INES: prg=' + opc.prg + ' — este montador cobre 1 ou 2 bancos de 16K');
+      }
+      if (opc.chr < 0 || opc.chr > 1) {
+        throw new AsmError('INES: chr=' + opc.chr + ' — 0 (CHR-RAM) ou 1 banco de 8K');
+      }
+      if (!/^[hv]/.test(opc.mirror)) {
+        throw new AsmError('INES: mirror=' + opc.mirror + ' — use h (horizontal) ou v (vertical)');
+      }
+      nes = { prg: opc.prg, chr: opc.chr, mapper: opc.mapper & 0xff,
+              mirror: opc.mirror[0], banco: 0, tipo: 'prg' };
+      seg.pc = 0;
+      seg.rpc = null;
+      /* O preenchimento padrao do DASM e $FF, que e o certo para EPROM apagada.
+         Aqui nao serve: tile que ninguem escreveu ficaria todo aceso, e a
+         galeria nasceria com 256 quadrados pintados. Zero e o que os montadores
+         de NES usam. Um segundo argumento no ORG continua mandando mais. */
+      filler = 0;
+      const flags6 = ((nes.mapper & 0x0f) << 4) | (nes.mirror === 'v' ? 1 : 0);
+      const cab = [0x4e, 0x45, 0x53, 0x1a, nes.prg, nes.chr, flags6, nes.mapper & 0xf0,
+                   0, 0, 0, 0, 0, 0, 0, 0];
+      for (const b of cab) emit(b);
+    }
+
+    function doBank(operand, tipo) {
+      const nome = tipo === 'chr' ? 'CHRBANK' : 'BANK';
+      if (!nes) throw new AsmError(nome + ': falta o INES antes');
+      const b = ev(operand).value;
+      const quantos = tipo === 'chr' ? nes.chr : nes.prg;
+      if (b < 0 || b >= quantos) {
+        throw new AsmError('banco ' + b + ' não existe: o cabeçalho declarou ' + quantos);
+      }
+      nes.tipo = tipo;
+      nes.banco = b;
+      seg.rpc = tipo === 'chr' ? 0 : nesJanela(b);
+      seg.pc = nesArquivo(seg.rpc);
+    }
+
     function step(n) {
       seg.pc = (seg.pc + n) & 0xffff;
       if (seg.rpc !== null) seg.rpc = (seg.rpc + n) & 0xffff;
@@ -3993,6 +4075,26 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
       const parts = splitArgs(operand);
       const target = ev(parts[0]).value & 0xffff;
       if (parts.length > 1) filler = ev(parts[1]).value & 0xff;
+
+      /* no modo NES o ORG recebe endereco de CPU, mas quem anda e o arquivo */
+      if (nes && !seg.uninit) {
+        const destino = nesArquivo(target);
+        const limite = nes.tipo === 'chr'
+          ? 16 + nes.prg * 0x4000 + (nes.banco + 1) * 0x2000
+          : 16 + (nes.banco + 1) * 0x4000;
+        if (destino < 16 || destino > limite) {
+          throw new AsmError('ORG $' + (target >>> 0).toString(16).toUpperCase() +
+            ' cai fora do banco ' + nes.banco + ' — troque de banco antes');
+        }
+        if (seg.started && destino > seg.pc) {
+          while (seg.pc < destino) emit(filler);      // o buraco vira preenchimento
+        } else {
+          seg.pc = destino;
+        }
+        seg.rpc = target;
+        return;
+      }
+
       if (!seg.uninit && seg.started && target > seg.pc) {
         while (seg.pc < target) emit(filler);
       } else {
@@ -4207,6 +4309,10 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
           break;
         }
 
+        case 'ines':     doInes(operand); break;
+        case 'bank':     doBank(operand, 'prg'); break;
+        case 'chrbank':  doBank(operand, 'chr'); break;
+
         case 'org':   doOrg(operand); break;
         case 'rorg':  seg.rpc = ev(operand, 'RORG').value & 0xffff; break;
         case 'rend':  seg.rpc = null; break;
@@ -4317,7 +4423,14 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     /* --- resultado ----------------------------------------------------------- */
     let rom = new Uint8Array(0);
-    if (minA >= 0) {
+    if (nes) {
+      /* o .nes tem tamanho declarado no proprio cabecalho: o que a pessoa nao
+         escreveu sai preenchido, senao o arquivo nasce truncado */
+      rom = new Uint8Array(nesTamanho());
+      rom.fill(filler);
+      for (let a = 0; a < rom.length; a++) if (used[a]) rom[a] = mem[a];
+      minA = 0;
+    } else if (minA >= 0) {
       rom = new Uint8Array(maxA - minA + 1);
       for (let a = minA; a <= maxA; a++) rom[a - minA] = used[a] ? mem[a] : filler;
     }
@@ -4832,7 +4945,9 @@ VERSION_MACRO         = 109
 
   return { assemble, listingText, symbolText, VERSION, OPS, BUILTIN };
 })();
+/* @fim dasm.js em src-atari */
 
+/* @embutido vcs.js em src-atari */
 /* ==========================================================================
    VCS — o nucleo de Atari 2600 do Editor Emulador Atari.
 
@@ -5664,6 +5779,7 @@ const VCS = (() => {
 
   return { create, WIDTH, LINES };
 })();
+/* @fim vcs.js em src-atari */
 
 /* ==========================================================================
    Aba Emulador: liga o núcleo VCS na página.
@@ -6729,6 +6845,19 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
 .codigo input { font: 12px var(--mono); background: #24303c; color: var(--ink);
                 border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px;
                 width: 22ch; }
+main.fonte { grid-template-columns: 1fr minmax(280px, 420px); }
+main.fonte #secTiles, main.fonte #secTile, main.fonte #secCode { display: none; }
+
+#fonte { width: 100%; height: calc(100vh - 340px); min-height: 240px; resize: vertical;
+         font: 12px/1.5 var(--mono); background: #0b1116; color: var(--ink);
+         border: 1px solid var(--edge); border-radius: 6px; padding: 8px;
+         white-space: pre; overflow: auto; tab-size: 8; }
+#fonte:focus { outline: 0; border-color: var(--accent); }
+.probs { font: 12px var(--mono); margin-top: 8px; max-height: 130px; overflow: auto; }
+.probs div { color: #ff9a8a; cursor: pointer; padding: 1px 0; }
+.probs div:hover { text-decoration: underline; }
+.probs div.aviso { color: #e8c04a; }
+.cdbar .spacer { flex: 1; }
 </style>
 
 
@@ -6743,6 +6872,7 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
   <div class="abas" id="abas">
     <button data-aba="tiles" class="on">Tiles</button>
     <button data-aba="codigo">Código</button>
+    <button data-aba="fonte">Fonte</button>
   </div>
   <span style="width:12px"></span>
   <button id="btOpen">Abrir .nes…</button>
@@ -6795,6 +6925,26 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
     dela se desloca. Endereço em azul é salto: clique para seguir.</p>
   </section>
 
+  <section id="secFonte" hidden>
+    <h2>Fonte</h2>
+    <div class="cdbar">
+      <button id="fnMontar">Montar e rodar</button>
+      <button id="fnAbrir">Abrir .asm…</button>
+      <button id="fnSalvar">Salvar .asm</button>
+      <span class="spacer"></span>
+      <button id="fnExemplo">Carregar o exemplo</button>
+    </div>
+    <textarea id="fonte" spellcheck="false" placeholder="; escreva aqui, ou clique em Carregar o exemplo"></textarea>
+    <div class="probs" id="fnProbs"></div>
+    <div class="info" id="fnInfo">nada montado ainda</div>
+    <p class="hint">O montador é o mesmo do editor de Atari, com três diretivas
+    a mais: <b>ines</b> escreve o cabeçalho e diz quantos bancos existem,
+    <b>bank</b> escolhe em qual deles o código vai cair, e <b>chrbank</b> passa
+    para a parte dos tiles. Depois disso o <b>org</b> recebe endereço de CPU
+    como sempre — quem traduz para posição no arquivo é o banco escolhido.
+    Cobre NROM: mapper 0, 16 ou 32K de código e 8K de tiles.</p>
+  </section>
+
   <section id="secEmu">
     <h2>Emulador</h2>
     <div class="nes-viewport" id="nesViewport">
@@ -6817,12 +6967,395 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
 
 <div class="drop" id="drop">solte o .nes aqui</div>
 <input type="file" id="file" accept=".nes" hidden>
+<input type="file" id="asmFile" accept=".asm,.s,.txt" hidden>
+
+<!-- o exemplo que a aba Fonte carrega; e o mesmo Arq_asm/nes-nave.asm -->
+<script type="text/plain" id="exemploAsm">
+; =============================================================================
+; nes-nave.asm -- a mesma nave do nave.asm, agora no NES
+;
+; Escrito para ser lido em par com o nave.asm do 2600: e o mesmo programa --
+; uma nave que anda com o controle, ceu, chao, mais nada -- nas duas maquinas.
+; Comparar os dois e a forma mais rapida de sentir a diferenca.
+;
+; No 2600 voce desenha a tela linha a linha, contando ciclos, e o programa e o
+; kernel. Aqui nao: a PPU desenha sozinha a partir do que voce deixou na
+; memoria dela, e o programa vira "arrume tudo antes do quadro comecar". Por
+; isso o corpo do jogo mora na NMI, que chega uma vez por quadro, e o laco
+; principal fica esperando.
+;
+; A outra troca: o 2600 tem 5 objetos e voce inventa o resto; o NES tem 64
+; sprites e uma grade de 32x30 tiles, todos vindos do CHR -- que aqui e montado
+; por tabelas no fim do arquivo, editaveis na aba Tiles.
+;
+; Dominio publico. Faca o que quiser com isto.
+; =============================================================================
+
+        processor 6502
+
+; O cabecalho iNES: 1 banco de 16K de codigo, 1 de 8K de tiles, mapper 0
+; (NROM, o cartucho sem troca de banco) e espelhamento vertical.
+        ines prg=1 chr=1 mapper=0 mirror=v
+
+; --- os registradores que a PPU e a APU expoem -------------------------------
+PPUCTRL         = $2000
+PPUMASK         = $2001
+PPUSTATUS       = $2002
+OAMADDR         = $2003
+PPUSCROLL       = $2005
+PPUADDR         = $2006
+PPUDATA         = $2007
+OAMDMA          = $4014
+APUSTATUS       = $4015
+JOY1            = $4016
+JOY2            = $4017
+
+; --- botoes, na ordem em que o controle entrega ------------------------------
+BOTAO_DIREITA   = %00000001
+BOTAO_ESQUERDA  = %00000010
+
+; --- ajustes do jogo ---------------------------------------------------------
+NAVE_Y          = 180           ; altura em que a nave voa
+NAVE_TILE       = 1             ; qual tile do CHR e a nave
+VELOCIDADE      = 2             ; pixels por quadro
+X_MIN           = 8
+X_MAX           = 240
+
+CHAO            = $2000 + 26*32 ; onde na grade do fundo o chao comeca
+
+; --- a memoria de trabalho ---------------------------------------------------
+; A pagina zero e a memoria rapida do 6502, igual no 2600. A diferenca e que
+; aqui sobra: o NES tem 2K de RAM contra os 128 bytes do 2600.
+        seg.u zeropage
+        org $0000
+
+naveX           ds 1            ; coluna da nave
+botoes          ds 1            ; o que o controle 1 esta segurando
+pronto          ds 1            ; a NMI avisa aqui que o quadro passou
+
+; A pagina 2 inteira e o rascunho dos 64 sprites: 4 bytes cada (y, tile,
+; atributo, x). Uma vez por quadro ela e copiada para a PPU de um golpe so.
+        seg.u oam
+        org $0200
+sprites         ds 256
+
+; =============================================================================
+        seg code
+        bank 0
+        org $C000
+
+; -----------------------------------------------------------------------------
+; Arranque
+; -----------------------------------------------------------------------------
+reset   subroutine
+        sei                     ; sem interrupcao ate estarmos prontos
+        cld                     ; o 2A03 nao tem modo decimal, mas o habito fica
+        ldx #$FF
+        txs                     ; pilha no topo da pagina 1
+        inx                     ; x = 0
+        stx PPUCTRL             ; desliga a NMI enquanto arrumamos a casa
+        stx PPUMASK             ; e a tela
+        stx APUSTATUS           ; e o som
+
+        ; A PPU leva dois quadros para acordar. Ate la ela ignora escrita, e
+        ; quem nao espera acaba com paleta pela metade.
+        bit PPUSTATUS
+.espera1
+        bit PPUSTATUS
+        bpl .espera1
+
+        jsr limparRam
+        jsr esconderSprites
+
+.espera2
+        bit PPUSTATUS
+        bpl .espera2
+
+        jsr carregarPaleta
+        jsr desenharChao
+
+        lda #128
+        sta naveX
+
+        ; Rolagem zerada. Sao duas escritas no mesmo registrador: a primeira e
+        ; o x, a segunda o y. Sem isto a tela nasce deslocada, porque as
+        ; escritas em PPUADDR ali em cima mexeram no mesmo par interno.
+        lda #0
+        sta PPUSCROLL
+        sta PPUSCROLL
+
+        lda #%10000000          ; liga a NMI de cada quadro
+        sta PPUCTRL
+        lda #%00011110          ; mostra fundo e sprites, inclusive na borda
+        sta PPUMASK
+        cli
+
+; -----------------------------------------------------------------------------
+; O laco principal so espera o quadro virar. Todo o trabalho esta na NMI --
+; e la que da para mexer na PPU sem sujar a imagem.
+; -----------------------------------------------------------------------------
+laco    subroutine
+        lda pronto
+        beq laco
+        lda #0
+        sta pronto
+        jmp laco
+
+; -----------------------------------------------------------------------------
+; NMI: chega uma vez por quadro, quando o feixe sai da tela
+; -----------------------------------------------------------------------------
+nmi     subroutine
+        pha                     ; a NMI interrompe qualquer coisa: guarde tudo
+        txa
+        pha
+        tya
+        pha
+
+        ; Copiar os 256 bytes do rascunho para a memoria de sprites da PPU.
+        ; Isto tem que vir primeiro: e a operacao mais cara do quadro, e so
+        ; cabe enquanto o feixe esta fora da tela.
+        lda #0
+        sta OAMADDR
+        lda #>sprites
+        sta OAMDMA
+
+        jsr lerControle
+        jsr moverNave
+        jsr montarSprite
+
+        lda #0                  ; a rolagem se perde a cada quadro: reponha
+        sta PPUSCROLL
+        sta PPUSCROLL
+
+        lda #1
+        sta pronto
+
+        pla
+        tay
+        pla
+        tax
+        pla
+irq     rti                     ; nao usamos IRQ; o vetor cai num rti
+
+; -----------------------------------------------------------------------------
+; Le o controle 1. O trinco pede uma foto dos botoes, e depois cada leitura
+; entrega um botao, do A ao Direita -- oito no total.
+; -----------------------------------------------------------------------------
+lerControle subroutine
+        lda #1
+        sta JOY1                ; trinca
+        lda #0
+        sta JOY1                ; solta: a foto ficou guardada
+        ldx #8
+.proximo
+        lda JOY1
+        lsr                     ; o bit 0 entra no carry
+        rol botoes              ; e o carry entra por baixo em botoes
+        dex
+        bne .proximo
+        rts
+
+; -----------------------------------------------------------------------------
+; Anda com a nave, respeitando as bordas
+; -----------------------------------------------------------------------------
+moverNave subroutine
+        lda botoes
+        and #BOTAO_ESQUERDA
+        beq .direita
+        lda naveX
+        sec
+        sbc #VELOCIDADE
+        cmp #X_MIN
+        bcc .direita            ; bateu na borda: nao anda
+        sta naveX
+.direita
+        lda botoes
+        and #BOTAO_DIREITA
+        beq .fim
+        lda naveX
+        clc
+        adc #VELOCIDADE
+        cmp #X_MAX
+        bcs .fim
+        sta naveX
+.fim    rts
+
+; -----------------------------------------------------------------------------
+; Monta o sprite 0 no rascunho: quatro bytes, nesta ordem
+; -----------------------------------------------------------------------------
+montarSprite subroutine
+        lda #NAVE_Y
+        sta sprites+0           ; y
+        lda #NAVE_TILE
+        sta sprites+1           ; qual tile
+        lda #0
+        sta sprites+2           ; atributo: paleta 0, sem espelho
+        lda naveX
+        sta sprites+3           ; x
+        rts
+
+; -----------------------------------------------------------------------------
+; Manda os 64 sprites para fora da tela. Y=$FF os esconde; sem isto o jogo
+; nasce com lixo espalhado, porque a memoria acorda suja.
+; -----------------------------------------------------------------------------
+esconderSprites subroutine
+        lda #$FF
+        ldx #0
+.proximo
+        sta sprites,x
+        inx
+        inx
+        inx
+        inx
+        bne .proximo
+        rts
+
+; -----------------------------------------------------------------------------
+; Zera a RAM toda
+; -----------------------------------------------------------------------------
+limparRam subroutine
+        lda #0
+        ldx #0
+.proximo
+        sta $0000,x
+        sta $0300,x
+        sta $0400,x
+        sta $0500,x
+        sta $0600,x
+        sta $0700,x
+        inx
+        bne .proximo
+        rts
+
+; -----------------------------------------------------------------------------
+; A paleta mora em $3F00 dentro da PPU: 16 cores para o fundo, 16 para os
+; sprites. Escrever la e sempre a mesma dança -- endereco alto, endereco
+; baixo, e depois os bytes seguidos.
+; -----------------------------------------------------------------------------
+carregarPaleta subroutine
+        bit PPUSTATUS           ; zera o meio-a-meio do PPUADDR
+        lda #$3F
+        sta PPUADDR
+        lda #$00
+        sta PPUADDR
+        ldx #0
+.proximo
+        lda paleta,x
+        sta PPUDATA
+        inx
+        cpx #32
+        bne .proximo
+        rts
+
+; -----------------------------------------------------------------------------
+; Desenha o chao: a grade de tiles do fundo tem 32 colunas por 30 linhas e
+; mora em $2000 dentro da PPU. Aqui so as quatro ultimas linhas viram grama.
+; -----------------------------------------------------------------------------
+desenharChao subroutine
+        bit PPUSTATUS
+        ; A grade do fundo comeca em $2000 e tem 32 tiles por linha, entao a
+        ; linha 26 fica em $2000 + 26*32. Os sinais < e > pegam o byte de baixo
+        ; e o de cima de um endereco -- a PPU quer os dois, nesta ordem.
+        lda #>CHAO
+        sta PPUADDR
+        lda #<CHAO
+        sta PPUADDR
+        ldy #4                  ; quatro linhas de grama
+.linha
+        ldx #32                 ; cada uma com 32 tiles
+.coluna
+        lda #2                  ; o tile 2 e a grama
+        sta PPUDATA
+        dex
+        bne .coluna
+        dey
+        bne .linha
+        rts
+
+; -----------------------------------------------------------------------------
+; As cores. Cada grupo de quatro e uma paleta; a primeira cor de todas e o
+; fundo da tela, e o NES a repete em todas elas.
+; -----------------------------------------------------------------------------
+paleta
+        ; fundo -- a cor 0 e o ceu, e o NES a repete em todas as paletas
+        .byte $21,$0F,$1A,$2A   ; ceu, preto, verde escuro, verde claro
+        .byte $21,$0F,$1A,$2A
+        .byte $21,$0F,$1A,$2A
+        .byte $21,$0F,$1A,$2A
+        ; sprites
+        .byte $21,$30,$0F,$16   ; ceu, branco, preto, vermelho
+        .byte $21,$30,$0F,$16
+        .byte $21,$30,$0F,$16
+        .byte $21,$30,$0F,$16
+
+; -----------------------------------------------------------------------------
+; Os vetores, no fim do banco. O do meio e o reset: e o unico endereco que o
+; NES conhece ao ligar, e por ele que tudo comeca.
+; -----------------------------------------------------------------------------
+        org $FFFA
+        .word nmi
+        .word reset
+        .word irq
+
+; =============================================================================
+; Os tiles. Cada um sao 16 bytes: oito para o plano de baixo da cor, oito para
+; o de cima. Um pixel com 1 nos dois planos usa a cor 3 da paleta.
+;
+; Da para desenhar por cima destes bytes na aba Tiles e ver o resultado
+; rodando na mesma pagina.
+; =============================================================================
+        chrbank 0
+        org $0000
+
+        ; tile 0: vazio
+        .byte $00,$00,$00,$00,$00,$00,$00,$00
+        .byte $00,$00,$00,$00,$00,$00,$00,$00
+
+        ; tile 1: a nave
+        .byte %00011000
+        .byte %00111100
+        .byte %00111100
+        .byte %01111110
+        .byte %01111110
+        .byte %11111111
+        .byte %11011011
+        .byte %10000001
+        .byte %00011000       ; o segundo plano acende so o miolo, que fica
+        .byte %00011000       ; com a cor 3 -- o vermelho da paleta
+        .byte %00011000
+        .byte %00011000
+        .byte %00111100
+        .byte %00111100
+        .byte %00011000
+        .byte %00000000
+
+        ; tile 2: grama. O plano de cima esta todo aceso, entao nenhum pixel
+        ; cai na cor 0 (que seria o ceu vazando); o de baixo salpica os que
+        ; sobem para a cor 3, o verde claro.
+        .byte %10001000
+        .byte %00100010
+        .byte %10001000
+        .byte %00100010
+        .byte %10001000
+        .byte %00100010
+        .byte %10001000
+        .byte %00100010
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+        .byte %11111111
+</script>
 
 <script>
 /* ==========================================================================
    O montador, o mesmo do editor de Atari: aqui ele serve ao painel de Código,
    que desmonta o PRG e monta de volta a linha reescrita.
    ========================================================================== */
+/* @embutido dasm.js em src-nes */
 /* ==========================================================================
    DASM.js — montador 6502 compatível com o DASM, escrito para o TIA Sprite
    Bench. Roda no navegador: o editor compila sem precisar de ajudante externo.
@@ -7119,6 +7652,87 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     const pc = () => (seg.rpc === null ? seg.pc : seg.rpc) & 0xffff;
 
+    /* --- modo NES ---------------------------------------------------------
+
+       O 2600 e simples: o cartucho e exatamente o que a CPU enxerga, entao
+       montar e so preencher um pedaco do espaco de 64K. No NES nao da: o
+       arquivo tem cabecalho na frente, os tiles atras, e dois bancos de PRG
+       moram no mesmo $8000 -- gravar por endereco de CPU faria um sobrescrever
+       o outro.
+
+       Entao no modo NES o que anda e a posicao no arquivo, e o endereco de CPU
+       vira so o que os rotulos enxergam (o rpc que o RORG ja usava). O ORG
+       continua recebendo endereco de CPU, como a pessoa espera; quem traduz
+       para posicao no arquivo e o banco escolhido.
+
+       O alcance e o de um arquivo inteiro de ate 64K -- NROM, mapper 0, 16 ou
+       32K de PRG mais 8K de CHR. E onde todo mundo comeca, e e o que cabe
+       neste modelo sem mentir. */
+    let nes = null;                    // { prg, chr, mapper, mirror, banco, tipo }
+
+    const nesJanela = b =>
+      nes.prg === 1 ? 0xc000 : (b === nes.prg - 1 ? 0xc000 : 0x8000 + b * 0x4000);
+
+    /* endereco que a maquina ve -> posicao dele dentro do arquivo */
+    function nesArquivo(addr) {
+      if (nes.tipo === 'chr') {
+        return 16 + nes.prg * 0x4000 + nes.banco * 0x2000 + (addr & 0x1fff);
+      }
+      return 16 + nes.banco * 0x4000 + ((addr - nesJanela(nes.banco)) & 0xffff);
+    }
+
+    function nesTamanho() { return 16 + nes.prg * 0x4000 + nes.chr * 0x2000; }
+
+    function doInes(operand) {
+      const opc = { prg: 1, chr: 1, mapper: 0, mirror: 'h' };
+      for (const par of operand.split(/[\s,]+/)) {
+        if (!par.trim()) continue;
+        const m = /^\s*(\w+)\s*=\s*(.+?)\s*$/.exec(par);
+        if (!m) throw new AsmError('INES: esperado nome=valor, veio «' + par.trim() + '»');
+        const chave = m[1].toLowerCase();
+        if (!(chave in opc)) {
+          throw new AsmError('INES: não conheço «' + chave + '» (use prg, chr, mapper, mirror)');
+        }
+        opc[chave] = chave === 'mirror' ? m[2].trim().toLowerCase() : ev(m[2]).value;
+      }
+      if (opc.prg < 1 || opc.prg > 2) {
+        throw new AsmError('INES: prg=' + opc.prg + ' — este montador cobre 1 ou 2 bancos de 16K');
+      }
+      if (opc.chr < 0 || opc.chr > 1) {
+        throw new AsmError('INES: chr=' + opc.chr + ' — 0 (CHR-RAM) ou 1 banco de 8K');
+      }
+      if (!/^[hv]/.test(opc.mirror)) {
+        throw new AsmError('INES: mirror=' + opc.mirror + ' — use h (horizontal) ou v (vertical)');
+      }
+      nes = { prg: opc.prg, chr: opc.chr, mapper: opc.mapper & 0xff,
+              mirror: opc.mirror[0], banco: 0, tipo: 'prg' };
+      seg.pc = 0;
+      seg.rpc = null;
+      /* O preenchimento padrao do DASM e $FF, que e o certo para EPROM apagada.
+         Aqui nao serve: tile que ninguem escreveu ficaria todo aceso, e a
+         galeria nasceria com 256 quadrados pintados. Zero e o que os montadores
+         de NES usam. Um segundo argumento no ORG continua mandando mais. */
+      filler = 0;
+      const flags6 = ((nes.mapper & 0x0f) << 4) | (nes.mirror === 'v' ? 1 : 0);
+      const cab = [0x4e, 0x45, 0x53, 0x1a, nes.prg, nes.chr, flags6, nes.mapper & 0xf0,
+                   0, 0, 0, 0, 0, 0, 0, 0];
+      for (const b of cab) emit(b);
+    }
+
+    function doBank(operand, tipo) {
+      const nome = tipo === 'chr' ? 'CHRBANK' : 'BANK';
+      if (!nes) throw new AsmError(nome + ': falta o INES antes');
+      const b = ev(operand).value;
+      const quantos = tipo === 'chr' ? nes.chr : nes.prg;
+      if (b < 0 || b >= quantos) {
+        throw new AsmError('banco ' + b + ' não existe: o cabeçalho declarou ' + quantos);
+      }
+      nes.tipo = tipo;
+      nes.banco = b;
+      seg.rpc = tipo === 'chr' ? 0 : nesJanela(b);
+      seg.pc = nesArquivo(seg.rpc);
+    }
+
     function step(n) {
       seg.pc = (seg.pc + n) & 0xffff;
       if (seg.rpc !== null) seg.rpc = (seg.rpc + n) & 0xffff;
@@ -7376,6 +7990,26 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
       const parts = splitArgs(operand);
       const target = ev(parts[0]).value & 0xffff;
       if (parts.length > 1) filler = ev(parts[1]).value & 0xff;
+
+      /* no modo NES o ORG recebe endereco de CPU, mas quem anda e o arquivo */
+      if (nes && !seg.uninit) {
+        const destino = nesArquivo(target);
+        const limite = nes.tipo === 'chr'
+          ? 16 + nes.prg * 0x4000 + (nes.banco + 1) * 0x2000
+          : 16 + (nes.banco + 1) * 0x4000;
+        if (destino < 16 || destino > limite) {
+          throw new AsmError('ORG $' + (target >>> 0).toString(16).toUpperCase() +
+            ' cai fora do banco ' + nes.banco + ' — troque de banco antes');
+        }
+        if (seg.started && destino > seg.pc) {
+          while (seg.pc < destino) emit(filler);      // o buraco vira preenchimento
+        } else {
+          seg.pc = destino;
+        }
+        seg.rpc = target;
+        return;
+      }
+
       if (!seg.uninit && seg.started && target > seg.pc) {
         while (seg.pc < target) emit(filler);
       } else {
@@ -7590,6 +8224,10 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
           break;
         }
 
+        case 'ines':     doInes(operand); break;
+        case 'bank':     doBank(operand, 'prg'); break;
+        case 'chrbank':  doBank(operand, 'chr'); break;
+
         case 'org':   doOrg(operand); break;
         case 'rorg':  seg.rpc = ev(operand, 'RORG').value & 0xffff; break;
         case 'rend':  seg.rpc = null; break;
@@ -7700,7 +8338,14 @@ sre zp=47 zpx=57 abs=4f abx=5f aby=5b izx=43 izy=53
 
     /* --- resultado ----------------------------------------------------------- */
     let rom = new Uint8Array(0);
-    if (minA >= 0) {
+    if (nes) {
+      /* o .nes tem tamanho declarado no proprio cabecalho: o que a pessoa nao
+         escreveu sai preenchido, senao o arquivo nasce truncado */
+      rom = new Uint8Array(nesTamanho());
+      rom.fill(filler);
+      for (let a = 0; a < rom.length; a++) if (used[a]) rom[a] = mem[a];
+      minA = 0;
+    } else if (minA >= 0) {
       rom = new Uint8Array(maxA - minA + 1);
       for (let a = minA; a <= maxA; a++) rom[a - minA] = used[a] ? mem[a] : filler;
     }
@@ -8215,7 +8860,9 @@ VERSION_MACRO         = 109
 
   return { assemble, listingText, symbolText, VERSION, OPS, BUILTIN };
 })();
+/* @fim dasm.js em src-nes */
 
+/* @embutido nes.js em src-nes */
 /* ==========================================================================
    NES — nucleo de Nintendo Entertainment System escrito para este projeto.
 
@@ -9634,6 +10281,7 @@ const NES = (() => {
 
   return { create, WIDTH, HEIGHT, MASTER, AUDIO_RATE };
 })();
+/* @fim nes.js em src-nes */
 
 /* ==========================================================================
    Editor de tiles do NES.
@@ -10607,15 +11255,123 @@ $('#cdIr').addEventListener('keydown', e => {
   cdIrPara(v);
 });
 
+/* --- a aba Fonte: escrever, montar e rodar sem sair da pagina ------------------
+
+   O montador aqui e o mesmo do editor de Atari -- o dasm.js inteiro. O que ele
+   ganhou para o NES foram tres diretivas: ines escreve o cabecalho, bank e
+   chrbank escolhem para onde vao os bytes seguintes. O resto e DASM de sempre.
+
+   Montou, o resultado entra pelo mesmo caminho de um arquivo aberto: os tiles
+   aparecem na galeria, o codigo na aba Codigo, e o jogo comeca a rodar. Um
+   ciclo fechado -- escreve, ve, mexe no tile, roda de novo.
+------------------------------------------------------------------------------ */
+function montarFonte() {
+  const fonte = $('#fonte').value;
+  if (!fonte.trim()) { say('não há nada para montar', true); return; }
+
+  const t0 = performance.now();
+  let r;
+  try {
+    r = DASM.assemble({ name: 'jogo.asm', source: fonte });
+  } catch (e) {
+    $('#fnInfo').textContent = 'o montador parou: ' + e.message;
+    say('o montador parou: ' + e.message, true);
+    return;
+  }
+
+  const caixa = $('#fnProbs');
+  caixa.innerHTML = '';
+  for (const p of r.problems) {
+    const d = document.createElement('div');
+    if (p.kind === 'warning') d.className = 'aviso';
+    d.textContent = 'linha ' + p.line + ': ' + p.message;
+    d.addEventListener('click', () => irParaLinha(p.line));
+    caixa.appendChild(d);
+  }
+
+  if (!r.ok) {
+    const erros = r.problems.filter(p => p.kind !== 'warning').length;
+    $('#fnInfo').textContent = erros
+      ? 'não montou: ' + erros + ' erro(s)'
+      : 'não montou: ' + (r.log || '').split('\n').pop();
+    say('não montou — veja a lista acima', true);
+    if (r.problems.length) irParaLinha(r.problems[0].line);
+    return;
+  }
+
+  const ms = Math.round(performance.now() - t0);
+  try {
+    openRom(r.rom, 'jogo.nes');
+  } catch (e) {
+    $('#fnInfo').textContent = 'montou ' + r.size + ' bytes, mas não é um .nes válido: ' + e.message;
+    say(e.message, true);
+    return;
+  }
+  $('#fnInfo').textContent =
+    'montou ' + r.size + ' bytes em ' + r.passes + ' passes (' + ms + ' ms) · ' +
+    r.symbols.length + ' símbolos';
+  $('#btRun').click();
+  say('montou e está rodando — ' + r.size + ' bytes');
+}
+
+/* leva o cursor para uma linha do fonte, e rola ate ela */
+function irParaLinha(n) {
+  const cx = $('#fonte');
+  const linhas = cx.value.split('\n');
+  let p = 0;
+  for (let i = 0; i < n - 1 && i < linhas.length; i++) p += linhas[i].length + 1;
+  cx.focus();
+  cx.setSelectionRange(p, p + (linhas[n - 1] || '').length);
+  const alturaLinha = cx.scrollHeight / linhas.length;
+  cx.scrollTop = Math.max(0, (n - 6) * alturaLinha);
+}
+
+$('#fnMontar').addEventListener('click', montarFonte);
+
+$('#fnExemplo').addEventListener('click', () => {
+  $('#fonte').value = $('#exemploAsm').textContent.replace(/^\n/, '');
+  $('#fnInfo').textContent = 'exemplo carregado — clique em Montar e rodar';
+  say('este é o mesmo nave.asm do Atari, refeito para o NES: compare os dois');
+});
+
+$('#fnAbrir').addEventListener('click', () => $('#asmFile').click());
+$('#asmFile').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $('#fonte').value = await f.text();
+  $('#fnInfo').textContent = f.name + ' · ' + f.size + ' bytes';
+  e.target.value = '';
+});
+
+$('#fnSalvar').addEventListener('click', () => {
+  const b = new Blob([$('#fonte').value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b);
+  a.download = 'jogo.asm';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+/* Ctrl+Enter monta, venha de onde vier o foco */
+$('#fonte').addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); montarFonte(); }
+});
+
 /* --- as abas ------------------------------------------------------------------- */
 $('#abas').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
   for (const o of $('#abas').children) o.classList.toggle('on', o === b);
-  const codigo = b.dataset.aba === 'codigo';
-  document.querySelector('main').classList.toggle('codigo', codigo);
-  $('#secCode').hidden = !codigo;
-  if (codigo && rom) { if (!cdInicio) cdIrPara(cdVetor('reset'), false); else cdDesenhar(); }
+  const qual = b.dataset.aba;
+  const m = document.querySelector('main');
+  m.classList.toggle('codigo', qual === 'codigo');
+  m.classList.toggle('fonte', qual === 'fonte');
+  $('#secCode').hidden = qual !== 'codigo';
+  $('#secFonte').hidden = qual !== 'fonte';
+  if (qual === 'codigo' && rom) {
+    if (!cdInicio) cdIrPara(cdVetor('reset'), false); else cdDesenhar();
+  }
 });
 
 buildSwatches();

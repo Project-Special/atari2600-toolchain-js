@@ -15,6 +15,8 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const DASM = require('./dasm.js');
 const NES = require('./nes.js');
 
@@ -654,6 +656,88 @@ function testaApu() {
         'variacao de ' + varia.toFixed(5));
 }
 
+/* ---------------------------------------------------------------------------
+   O exemplo do repositorio, montado do fonte
+
+   Os outros casos aqui usam ROMs escritas dentro deste arquivo, minimas e feitas
+   para isolar um comportamento. Este e diferente: pega o nes-nave.asm que a
+   pessoa vai abrir na aba Fonte, monta com as diretivas de NES e joga com ele.
+   E o unico teste que cobre o caminho inteiro -- fonte, cabecalho, PPU, controle
+   -- do jeito que alguem aprendendo vai usar.
+   --------------------------------------------------------------------------- */
+function testaExemplo() {
+  const caminho = path.join(__dirname, '..', 'Arq_asm', 'nes-nave.asm');
+  if (!fs.existsSync(caminho)) { check('o exemplo nes-nave.asm existe', false, caminho); return; }
+
+  const r = DASM.assemble({ name: 'nes-nave.asm', source: fs.readFileSync(caminho, 'utf8') });
+  if (!r.ok) {
+    const e = r.problems.filter(p => p.kind === 'error');
+    check('o exemplo monta', false, e.slice(0, 2).map(p => p.line + ': ' + p.message).join(' | '));
+    return;
+  }
+  check('o exemplo monta', true, r.size + ' bytes, ' + r.symbols.length + ' símbolos');
+
+  const cab = Array.from(r.rom.slice(0, 8));
+  check('o cabeçalho iNES sai certo',
+    cab[0] === 0x4e && cab[1] === 0x45 && cab[2] === 0x53 && cab[3] === 0x1a &&
+    cab[4] === 1 && cab[5] === 1 && (cab[6] & 1) === 1 && (cab[6] >> 4) === 0,
+    'NES\\x1a · prg ' + cab[4] + ' · chr ' + cab[5] + ' · flags6 $' + cab[6].toString(16));
+  check('o tamanho bate com o que o cabeçalho declara',
+    r.size === 16 + cab[4] * 16384 + cab[5] * 8192, r.size + ' bytes');
+
+  const reset = r.rom[16 + 0x3ffc] | (r.rom[16 + 0x3ffd] << 8);
+  check('o vetor de reset aponta para o código', reset >= 0xc000,
+    '$' + reset.toString(16).toUpperCase());
+
+  const n = NES.create();
+  n.load(r.rom);
+  let out;
+  const anda = (quadros, botao) => {
+    if (botao) n.setButton(0, botao, true);
+    for (let f = 0; f < quadros; f++) out = n.frame();
+    if (botao) n.setButton(0, botao, false);
+  };
+  /* a nave e o unico objeto na faixa de ceu: acha a coluna do meio dela */
+  const ondeEstaANave = () => {
+    const y = 185, ceu = out.pixels[y * 256 + 2];
+    let x0 = -1, x1 = -1;
+    for (let x = 0; x < 256; x++) {
+      if (out.pixels[y * 256 + x] !== ceu) { if (x0 < 0) x0 = x; x1 = x; }
+    }
+    return x0 < 0 ? -1 : ((x0 + x1) / 2) | 0;
+  };
+
+  anda(10);
+  check('o céu é azul', out.pixels[20 * 256 + 128] === cor(0x21),
+    '#' + (out.pixels[20 * 256 + 128] >>> 0).toString(16).padStart(6, '0'));
+  const chao = new Set();
+  for (let x = 0; x < 256; x++) chao.add(out.pixels[215 * 256 + x]);
+  check('o chão está desenhado, em dois verdes',
+    chao.size === 2 && chao.has(cor(0x1a)) && chao.has(cor(0x2a)),
+    [...chao].map(c => '#' + (c >>> 0).toString(16).padStart(6, '0')).join(' '));
+
+  const inicio = ondeEstaANave();
+  check('a nave aparece', inicio > 0, 'coluna ' + inicio);
+
+  anda(30, 'right');
+  const dir = ondeEstaANave();
+  check('o controle move para a direita', dir > inicio + 40,
+    inicio + ' -> ' + dir + ' (' + (dir - inicio) + ' px em 30 quadros)');
+
+  anda(30, 'left');
+  const esq = ondeEstaANave();
+  check('e para a esquerda', esq < dir - 40, dir + ' -> ' + esq);
+
+  anda(400, 'left');
+  const borda = ondeEstaANave();
+  check('e para na borda em vez de sair da tela', borda > 0 && borda < 20,
+    'coluna ' + borda + ' (X_MIN é 8)');
+
+  anda(120);
+  check('parada, a nave fica onde estava', ondeEstaANave() === borda,
+    'coluna ' + ondeEstaANave());
+}
+
 /* -------------------------------------------------------------------------- */
 testaCabecalho();
 testaTela();
@@ -661,6 +745,7 @@ testaRolagem();
 testaSprite0();
 testaMmc3();
 testaApu();
+testaExemplo();
 
 console.log(bad ? bad + ' caso(s) falhando' : 'emulador de NES ok');
 process.exit(bad ? 1 : 0);

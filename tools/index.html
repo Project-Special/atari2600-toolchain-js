@@ -1703,6 +1703,21 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
 <div class="toast" id="toast"></div>
 
 <script>
+/* ---------------------------------------------------------------------------
+   Deste ponto ate o fim do arquivo e o escopo deste editor, e so dele.
+
+   O index.html guarda dois documentos: cada <template> vira uma pagina inteira
+   pelo srcdoc, com seu proprio window. Em pe, portanto, nada aqui se encontra
+   com o outro editor -- os dois podem ter um $, um say, um setPixel.
+
+   Parado, nao: qualquer coisa que leia o arquivo (o editor de codigo, um
+   validador) ve um programa so, e acusa doze redeclaracoes que nao existem.
+   Este embrulho resolve os dois lados -- ninguem mais tropeca, e nenhum nome
+   escapa para o global sem a gente querer.
+   --------------------------------------------------------------------------- */
+(() => {
+'use strict';
+
 "use strict";
 
 /* --- TIA NTSC palette, 16 hues x 8 luminances ----------------------------- */
@@ -1734,7 +1749,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 17:50';
+const APP_BUILD = '2026-08-22 18:27';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6731,6 +6746,18 @@ updateTitle();
 $('#aboutBuild').textContent = APP_BUILD;
 $('#sver').textContent = 'v' + APP_BUILD.replace(/[^0-9]/g, '').slice(0, 12);
 say('Pronto. Arquivo ▸ Abrir .asm para editar os sprites de um fonte.');
+
+/* A mesma alca do outro editor, com o que faz sentido deste lado. */
+window.editorAtari = {
+  abrirImagem: loadImage,
+  abrirAsm: openAsm,
+  montar: buildFile,
+  exportarPng: exportPng,
+  ligar: emuPowerOn,
+  desligar: emuPowerOff,
+  get estado() { return S; },
+};
+})();
 </script>
 </template>
 
@@ -7658,6 +7685,21 @@ paleta
 </script>
 
 <script>
+/* ---------------------------------------------------------------------------
+   Deste ponto ate o fim do arquivo e o escopo deste editor, e so dele.
+
+   O index.html guarda dois documentos: cada <template> vira uma pagina inteira
+   pelo srcdoc, com seu proprio window. Em pe, portanto, nada aqui se encontra
+   com o outro editor -- os dois podem ter um $, um say, um setPixel.
+
+   Parado, nao: qualquer coisa que leia o arquivo (o editor de codigo, um
+   validador) ve um programa so, e acusa doze redeclaracoes que nao existem.
+   Este embrulho resolve os dois lados -- ninguem mais tropeca, e nenhum nome
+   escapa para o global sem a gente querer.
+   --------------------------------------------------------------------------- */
+(() => {
+'use strict';
+
 /* ==========================================================================
    O montador, o mesmo do editor de Atari: aqui ele serve ao painel de Código,
    que desmonta o PRG e monta de volta a linha reescrita.
@@ -10675,8 +10717,12 @@ function parseRom(bytes) {
   }
   const prg16k = bytes[4], chr8k = bytes[5];
   const flags6 = bytes[6], flags7 = bytes[7];
-  if ((flags7 & 0x0c) === 0x08) throw new Error('NES 2.0 ainda não é suportado');
   if (!prg16k) throw new Error('arquivo iNES sem bancos de PRG');
+  /* NES 2.0 nao e motivo para recusar o arquivo. Os oito primeiros bytes sao
+     compativeis com o iNES, entao os tiles e o codigo estao onde a gente
+     espera -- da para editar. Quem nao le o formato e o emulador, e isso ele
+     diz na propria linha de informacao. */
+  const nes20 = (flags7 & 0x0c) === 0x08;
   const trainer = (flags6 & 4) ? 512 : 0;
   const expected = 16 + trainer + prg16k * 16384 + chr8k * 8192;
   if (bytes.length < expected) {
@@ -10688,10 +10734,13 @@ function parseRom(bytes) {
     prg16k, chr8k,
     mapper,
     mirroring: fourScreen ? 'quatro telas' : ((flags6 & 1) ? 'vertical' : 'horizontal'),
-    emulable: SUPPORTED_MAPPERS.has(mapper) && !fourScreen,
-    emulationNote: !SUPPORTED_MAPPERS.has(mapper)
-      ? 'mapper ' + mapper + ' ainda não é suportado'
-      : (fourScreen ? 'espelhamento de quatro telas ainda não é suportado' : ''),
+    nes20,
+    emulable: !nes20 && SUPPORTED_MAPPERS.has(mapper) && !fourScreen,
+    emulationNote: nes20
+      ? 'o cabeçalho é NES 2.0, que o emulador ainda não lê — os tiles você edita assim mesmo'
+      : !SUPPORTED_MAPPERS.has(mapper)
+        ? 'mapper ' + mapper + ' ainda não é suportado'
+        : (fourScreen ? 'espelhamento de quatro telas ainda não é suportado' : ''),
     prgStart: 16 + trainer,
     prgLen: prg16k * 16384,
     chrStart: 16 + trainer + prg16k * 16384,
@@ -10728,7 +10777,7 @@ function openRom(bytes, name) {
   $('#romInfo').textContent =
     'mapper ' + h.mapper + ' · PRG ' + (h.prg16k * 16) + 'K · CHR ' +
     (h.chr8k ? h.chr8k * 8 + 'K' : 'RAM') + ' · ' + h.mirroring +
-    (h.emulable ? '' : ' · emulação indisponível');
+    (h.emulable ? '' : ' · ' + (h.emulationNote || 'emulação indisponível'));
 
   const sel = $('#bank');
   sel.textContent = '';
@@ -10746,7 +10795,12 @@ function openRom(bytes, name) {
 
   $('#btRecap').hidden = !!h.chrLen || !h.emulable;
 
-  if (!h.chrLen && h.emulable) {
+  if (!h.chrLen && !h.emulable) {
+    /* Os tiles desta so existem enquanto o jogo roda, e o jogo nao roda aqui. */
+    say(name + ' usa CHR-RAM — os tiles são montados pelo código, não estão no ' +
+        'arquivo — e o emulador não roda esta ROM (' + h.emulationNote +
+        '). Sem rodar não há como ver os tiles, então a galeria fica vazia.', true);
+  } else if (!h.chrLen && h.emulable) {
     /* CHR-RAM: roda o jogo para ver o que ele monta, e acha no PRG */
     const r = prepararChrRam(150);
     say(name + ' usa CHR-RAM: o jogo monta os tiles em tempo de execução. Rodei ' +
@@ -10757,7 +10811,11 @@ function openRom(bytes, name) {
   } else if (h.chrLen) {
     say(name + ' aberta — ' + (chrLen / 16) + ' tiles');
   }
-  if (!h.emulable) say(name + ' aberta para editar os tiles; ' + h.emulationNote + '.', true);
+  /* O aviso de "nao roda" so vale quando ainda ha o que editar; a ROM sem CHR
+     no arquivo ja disse la em cima que nao sobra nada. */
+  if (!h.emulable && h.chrLen) {
+    say(name + ' aberta para editar os tiles; ' + h.emulationNote + '.', true);
+  }
   drawGallery();
   drawGrid();
   updateDirty();
@@ -10866,8 +10924,14 @@ function prepararChrRam(quadros) {
 /* onde mora cada plano de um tile: com CHR no arquivo, os dois seguidos; com
    CHR-RAM, onde a gente achou cada um -- ou lugar nenhum */
 function planoBase(t, plano) {
-  if (!chrRam) return chrStart + t * 16 + plano * 8;
-  return plano ? ramHi[t] : ramLo[t];
+  if (chrRam) return plano ? ramHi[t] : ramLo[t];
+  /* Sem CHR no arquivo e sem foto da RAM, nao ha byte nenhum para apontar --
+     e o caso da ROM de CHR-RAM que o emulador nao roda. Devolver o endereco
+     na conta faria a galeria mostrar 512 tiles vazios como se fossem editaveis,
+     e a gravacao cairia fora do arquivo, calada. */
+  if (!chrLen) return -1;
+  const b = chrStart + t * 16 + plano * 8;
+  return b + 8 <= rom.length ? b : -1;
 }
 function editavel(t) { return planoBase(t, 0) >= 0 || planoBase(t, 1) >= 0; }
 
@@ -10929,7 +10993,7 @@ function drawGallery() {
 
   /* Esmaece o que nao da para gravar, e poe um canto amarelo no que e palpite:
      esses a gente achou por casamento de bytes solto, e pode nao pegar. */
-  if (chrRam) {
+  if (chrRam || !chrLen) {
     for (let i = 0; i < BANK_TILES; i++) {
       const t = first + i;
       const x = (i % TILES_PER_ROW) * 8 * GZ, y = ((i / TILES_PER_ROW) | 0) * 8 * GZ;
@@ -11685,6 +11749,20 @@ $('#abas').addEventListener('click', e => {
 buildSwatches();
 buildPalette();
 drawGallery();
+
+/* Uma alca no global, de proposito e com nome proprio: da para abrir uma ROM,
+   ler e escrever pixel de tile e montar um fonte pelo console do navegador,
+   sem passar pela interface. E por onde os testes automatizados entram. */
+window.editorNes = {
+  abrir: openRom,
+  montar: montarFonte,
+  getPixel, setPixel, planoBase, editavel,
+  get rom() { return rom; },
+  get nome() { return romName; },
+  get chrRam() { return chrRam; },
+  get nota() { return ramNota; },
+};
+})();
 </script>
 </template>
 

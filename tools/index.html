@@ -1734,7 +1734,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 17:19';
+const APP_BUILD = '2026-08-22 17:41';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6821,8 +6821,11 @@ h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: u
                border-radius: 4px; font: 600 12px var(--sans); }
 .abas button.on { background: #24303c; color: var(--ink); }
 
-main.codigo { grid-template-columns: 1fr minmax(280px, 420px); }
-main.codigo #secTiles, main.codigo #secTile { display: none; }
+/* O modo da aba vai em modo-*, nao em .codigo: a lista de instrucoes ja usa
+   esse nome, e o <main> acabava herdando o max-height dela -- sobrava um vao
+   morto embaixo do rodape e o codigo cabia em 21 linhas. */
+main.modo-codigo { grid-template-columns: 1fr minmax(280px, 420px); }
+main.modo-codigo #secTiles, main.modo-codigo #secTile { display: none; }
 
 .cdbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .cdbar input { font: 12px var(--mono); background: #1b2530; color: var(--ink);
@@ -6830,7 +6833,7 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
                min-width: 180px; }
 .codigo { font: 12px/1.55 var(--mono); white-space: pre; overflow: auto;
           border: 1px solid var(--edge); border-radius: 6px; padding: 6px 0;
-          background: #0b1116; max-height: calc(100vh - 300px); }
+          background: #0b1116; flex: 1; min-height: 120px; }
 .codigo .ln { padding: 0 10px; display: block; }
 .codigo .ln:hover { background: #16212b; }
 .codigo .ln.aqui { background: #1c2b38; }
@@ -6845,10 +6848,26 @@ main.codigo #secTiles, main.codigo #secTile { display: none; }
 .codigo input { font: 12px var(--mono); background: #24303c; color: var(--ink);
                 border: 1px solid var(--accent); border-radius: 3px; padding: 0 4px;
                 width: 22ch; }
-main.fonte { grid-template-columns: 1fr minmax(280px, 420px); }
-main.fonte #secTiles, main.fonte #secTile, main.fonte #secCode { display: none; }
+main.modo-fonte { grid-template-columns: 1fr minmax(280px, 420px); }
+main.modo-fonte #secTiles, main.modo-fonte #secTile, main.modo-fonte #secCode { display: none; }
 
-#fonte { width: 100%; height: calc(100vh - 340px); min-height: 240px; resize: vertical;
+/* A lista e o editor de texto crescem ate o fim do painel; o resto fica fixo.
+   O :not([hidden]) e obrigatorio: display: flex ganha do display: none que o
+   atributo hidden traz, e o painel escondido continuaria ocupando celula. */
+#secCode:not([hidden]), #secFonte:not([hidden]) {
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#secCode > h2, #secFonte > h2 { flex: none; }
+#secCode .cdbar, #secFonte .cdbar, #secCode .info, #secFonte .info,
+#secCode .hint, #secFonte .hint, .probs { flex: none; }
+details.hint { margin: 6px 0 0; }
+details.hint summary { cursor: pointer; color: var(--dim); font-size: 12px;
+                       list-style: revert; }
+details.hint summary:hover { color: var(--ink); }
+details.hint[open] { margin-bottom: 4px; }
+#secCode .cdbar, #secFonte .cdbar { margin-top: 0; }
+
+#fonte { width: 100%; flex: 1; min-height: 160px;
          font: 12px/1.5 var(--mono); background: #0b1116; color: var(--ink);
          border: 1px solid var(--edge); border-radius: 6px; padding: 8px;
          white-space: pre; overflow: auto; tab-size: 8; }
@@ -6911,7 +6930,6 @@ main.fonte #secTiles, main.fonte #secTile, main.fonte #secCode { display: none; 
   </section>
 
   <section id="secCode" hidden>
-    <h2>Código</h2>
     <div class="cdbar">
       <label>banco em $8000</label><select id="cdBanco"></select>
       <input id="cdIr" placeholder="ir para: $C123, reset, nmi ou irq" spellcheck="false">
@@ -6919,14 +6937,14 @@ main.fonte #secTiles, main.fonte #secTile, main.fonte #secCode { display: none; 
     </div>
     <div class="codigo" id="cdLista"></div>
     <div class="info" id="cdInfo">abra uma ROM</div>
-    <p class="hint">Clique numa instrução para reescrevê-la; <b>Enter</b> grava,
+    <details class="hint"><summary>como mexer aqui</summary>
+    Clique numa instrução para reescrevê-la; <b>Enter</b> grava,
     <b>Esc</b> desiste. A linha nova precisa caber nos mesmos bytes da antiga —
     se sobrar espaço, o resto vira <b>nop</b>, e assim nenhum endereço depois
-    dela se desloca. Endereço em azul é salto: clique para seguir.</p>
+    dela se desloca. Endereço em azul é salto: clique para seguir.</details>
   </section>
 
   <section id="secFonte" hidden>
-    <h2>Fonte</h2>
     <div class="cdbar">
       <button id="fnMontar">Montar e rodar</button>
       <button id="fnAbrir">Abrir .asm…</button>
@@ -6937,12 +6955,13 @@ main.fonte #secTiles, main.fonte #secTile, main.fonte #secCode { display: none; 
     <textarea id="fonte" spellcheck="false" placeholder="; escreva aqui, ou clique em Carregar o exemplo"></textarea>
     <div class="probs" id="fnProbs"></div>
     <div class="info" id="fnInfo">nada montado ainda</div>
-    <p class="hint">O montador é o mesmo do editor de Atari, com três diretivas
+    <details class="hint"><summary>o que este montador aceita</summary>
+    O montador é o mesmo do editor de Atari, com três diretivas
     a mais: <b>ines</b> escreve o cabeçalho e diz quantos bancos existem,
     <b>bank</b> escolhe em qual deles o código vai cair, e <b>chrbank</b> passa
     para a parte dos tiles. Depois disso o <b>org</b> recebe endereço de CPU
     como sempre — quem traduz para posição no arquivo é o banco escolhido.
-    Cobre NROM: mapper 0, 16 ou 32K de código e 8K de tiles.</p>
+    Cobre NROM: mapper 0, 16 ou 32K de código e 8K de tiles.</details>
   </section>
 
   <section id="secEmu">
@@ -11365,8 +11384,8 @@ $('#abas').addEventListener('click', e => {
   for (const o of $('#abas').children) o.classList.toggle('on', o === b);
   const qual = b.dataset.aba;
   const m = document.querySelector('main');
-  m.classList.toggle('codigo', qual === 'codigo');
-  m.classList.toggle('fonte', qual === 'fonte');
+  m.classList.toggle('modo-codigo', qual === 'codigo');
+  m.classList.toggle('modo-fonte', qual === 'fonte');
   $('#secCode').hidden = qual !== 'codigo';
   $('#secFonte').hidden = qual !== 'fonte';
   if (qual === 'codigo' && rom) {

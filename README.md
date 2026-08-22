@@ -149,6 +149,7 @@ Três fontes originais, em domínio público, em `Arq_asm/`:
 | `dialeto.asm` | não é jogo: passa por todo canto do montador (macro com argumento, `REPEAT`, condicional, `RORG`, `SET`, `EQM`, rótulo local, opcode não documentado) para o teste ter o que comparar |
 | `nes-nave-0.asm` | o `nave.asm` refeito para o NES, para os dois serem lidos em par: o mesmo jogo, e a diferença entre desenhar a tela contando ciclos e deixar a PPU desenhar |
 | `nes-nave-1.asm` | o mesmo, com tiro: o botão A dispara (na página, a barra de espaço também), um tiro por vez, disparo por borda para segurar o botão não metralhar |
+| `nes-nave-2.asm` | agora há o que derrubar: uma nave inimiga cruza o alto, o tiro a abate e ela volta pela borda depois de um tempo. A colisão é conta de caixa feita no código — o NES só tem detecção de hardware para o sprite 0, e ela não serve para isto. O inimigo usa a paleta 1 de sprites, que é o que o byte de atributo escolhe |
 
 A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
 novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
@@ -163,8 +164,10 @@ Os fontes de NES não entram na comparação contra o `dasm.exe` — as diretiva
 NES são extensão daqui, e o DASM de verdade as recusaria. Quem confere aqueles é
 o `nes-test.js`, que monta cada um e joga com ele: confere o cabeçalho, o vetor
 de reset, a cor do céu e do chão, que a nave anda com o controle e para na
-borda, e — de onde existe tiro — que ele sai, sobe, some no alto e não vira
-metralhadora quando o botão fica preso.
+borda, e — de onde existem — que o tiro sai, sobe, some no alto e não vira
+metralhadora com o botão preso, e que o inimigo cruza a tela, cai quando é
+acertado e volta depois da espera. Esse último caso **joga**: mira adiante do
+alvo, porque o tiro leva 34 quadros para subir e nesse tempo o inimigo anda.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o

@@ -723,20 +723,31 @@ function testaExemplo(caminho) {
   n.load(r.rom);
   const j = jogador(n);
 
-  /* a nave e o unico objeto na faixa de ceu: acha a coluna do meio dela */
-  const ondeEstaANave = () => {
-    const y = 185, ceu = j.tela.pixels[y * 256 + 2];
+  /* Coluna do meio do que aparecer numa faixa de linhas. Com `cores`, so esses
+     tons contam -- o tiro cruza a faixa do inimigo, e sem o filtro passaria
+     por ele. */
+  const meioNaFaixa = (y0, y1, cores) => {
+    const ceu = j.tela.pixels[10 * 256 + 2];
     let x0 = -1, x1 = -1;
-    for (let x = 0; x < 256; x++) {
-      if (j.tela.pixels[y * 256 + x] !== ceu) { if (x0 < 0) x0 = x; x1 = x; }
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < 256; x++) {
+        const p = j.tela.pixels[y * 256 + x];
+        if (p === ceu || (cores && cores.indexOf(p) < 0)) continue;
+        if (x0 < 0 || x < x0) x0 = x;
+        if (x > x1) x1 = x;
+      }
     }
     return x0 < 0 ? -1 : ((x0 + x1) / 2) | 0;
   };
-  /* a linha mais alta com algo desenhado acima da nave -- o tiro, quando ha */
+  const ondeEstaANave = () => meioNaFaixa(178, 192);
+  const ondeEstaOInimigo = () => meioNaFaixa(36, 50, [cor(0x27), cor(0x14)]);
+  /* A linha mais alta onde ha tiro. Procura a cor dele -- o preto da paleta 0 --
+     e nao "qualquer coisa que nao seja ceu": a partir do -2 o inimigo cruza a
+     mesma faixa, e o teste acharia ele. */
   const alturaDoTiro = () => {
-    const ceu = j.tela.pixels[10 * 256 + 2];
+    const preto = cor(0x0f);
     for (let y = 16; y < 175; y++) {
-      for (let x = 0; x < 256; x++) if (j.tela.pixels[y * 256 + x] !== ceu) return y;
+      for (let x = 0; x < 256; x++) if (j.tela.pixels[y * 256 + x] === preto) return y;
     }
     return -1;
   };
@@ -796,6 +807,47 @@ function testaExemplo(caminho) {
   j.solta('a');
   check(nome + ': segurar o A não metralha', depois > 0 && depois < primeiro - 15,
     primeiro + ' -> ' + depois + ' com o botão preso');
+
+  /* e o inimigo so a partir do -2 */
+  if (!/INIMIGO_TILE/.test(fs.readFileSync(caminho, 'utf8'))) return;
+
+  j.anda(20);
+  check(nome + ': o inimigo cruza o alto da tela', ondeEstaOInimigo() > 0,
+    'coluna ' + ondeEstaOInimigo());
+  /* espera ele dar a volta, senao a medida cai em cima da virada */
+  for (let f = 0; f < 300 && ondeEstaOInimigo() > 80; f++) j.anda(1);
+  const iA = ondeEstaOInimigo();
+  j.anda(60);
+  const iB = ondeEstaOInimigo();
+  check(nome + ': e anda 1 pixel por quadro', iB - iA >= 55 && iB - iA <= 65,
+    iA + ' -> ' + iB + ' em 60 quadros');
+
+  /* Joga de verdade: o tiro leva (NAVE_Y-6 - INIMIGO_Y)/TIRO_VEL quadros para
+     subir, e nesse tempo o inimigo anda. Entao mira-se adiante dele -- que e
+     justamente o que torna o jogo um jogo. */
+  const VOO = Math.ceil((180 - 6 - 40) / 4);
+  let derrubado = -1, tiros = 0;
+  for (let f = 0; f < 900 && derrubado < 0; f++) {
+    const alvo = ondeEstaOInimigo();
+    if (alvo < 0) { derrubado = f; break; }
+    const d = (alvo + VOO) - ondeEstaANave();
+    n.setButton(0, 'right', d > 2);
+    n.setButton(0, 'left', d < -2);
+    const mirando = Math.abs(d) <= 2;
+    n.setButton(0, 'a', mirando && f % 4 === 0);
+    if (mirando && f % 4 === 0) tiros++;
+    j.anda(1);
+  }
+  for (const b of ['right', 'left', 'a']) n.setButton(0, b, false);
+  check(nome + ': o tiro derruba o inimigo', derrubado >= 0,
+    derrubado >= 0 ? 'caiu no quadro ' + derrubado + ' com ' + tiros + ' disparo(s)'
+                   : 'não caiu em 900 quadros com ' + tiros + ' disparos');
+  if (derrubado < 0) return;
+
+  let voltou = -1;
+  for (let f = 0; f < 200; f++) { j.anda(1); if (voltou < 0 && ondeEstaOInimigo() >= 0) voltou = f; }
+  check(nome + ': e volta depois da espera', voltou >= 80 && voltou <= 100,
+    'voltou ' + voltou + ' quadros depois (INIMIGO_ESPERA é 90)');
 }
 
 function testaExemplos() {

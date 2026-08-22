@@ -6993,16 +6993,19 @@ details.hint[open] { margin-bottom: 4px; }
 <!-- o exemplo que a aba Fonte carrega; e o mesmo Arq_asm/nes-nave.asm -->
 <script type="text/plain" id="exemploAsm">
 ; =============================================================================
-; nes-nave-1.asm -- a nave, agora atirando
+; nes-nave-2.asm -- agora ha o que derrubar
 ;
-; O que mudou do -0 para ca:
-;   * o botao A dispara um tiro (na pagina, a barra de espaco tambem)
-;   * um tiro por vez: so sai outro depois que o primeiro deixa a tela
-;   * o disparo e por borda, nao por botao pressionado -- segurar nao metralha
-;   * sprite 1 passou a ser o tiro, e o tile 3 e o desenho dele
+; O que mudou do -1 para ca:
+;   * uma nave inimiga cruza o alto da tela, da esquerda para a direita
+;   * o tiro derruba ela; depois de um tempo ela volta pela borda
+;   * a colisao e conta de caixa, feita no codigo -- o NES so tem deteccao de
+;     hardware para o sprite 0, e ela nao serve para isto
+;   * sprite 2 e o inimigo, tile 4 o desenho, e ele usa a paleta 1 de sprites,
+;     que e o que o byte de atributo escolhe
 ;
 ; O -0 e o mesmo programa que o nave.asm do 2600, para os dois serem lidos em
-; par. Daqui em diante os numeros contam o que foi mudando.
+; par. Daqui em diante os numeros contam o que foi mudando -- diff entre dois
+; deles e a explicacao mais curta que existe.
 ;
 ; No 2600 voce desenha a tela linha a linha, contando ciclos, e o programa e o
 ; kernel. Aqui nao: a PPU desenha sozinha a partir do que voce deixou na
@@ -7055,6 +7058,12 @@ TIRO_VEL        = 4             ; sobe mais rapido do que a nave anda
 TIRO_TOPO       = 16            ; acima disto o tiro some
 TIRO_FORA       = 0             ; tiroY = 0 quer dizer "nenhum tiro na tela"
 
+INIMIGO_TILE    = 4
+INIMIGO_Y       = 40            ; a altura em que ele cruza
+INIMIGO_VEL     = 1             ; devagar: da tempo de mirar
+INIMIGO_ESPERA  = 90            ; quadros ate voltar depois de cair
+PERTO           = 8             ; a caixa da colisao tem a largura de um tile
+
 CHAO            = $2000 + 26*32 ; onde na grade do fundo o chao comeca
 
 ; --- a memoria de trabalho ---------------------------------------------------
@@ -7070,6 +7079,9 @@ novos           ds 1            ; os que acabaram de ser apertados
 pronto          ds 1            ; a NMI avisa aqui que o quadro passou
 tiroX           ds 1            ; coluna do tiro
 tiroY           ds 1            ; linha do tiro; 0 = nao ha tiro
+inimigoX        ds 1            ; coluna do inimigo
+inimigoVivo     ds 1            ; 0 = caiu, esperando voltar
+espera          ds 1            ; quantos quadros faltam para ele voltar
 
 ; A pagina 2 inteira e o rascunho dos 64 sprites: 4 bytes cada (y, tile,
 ; atributo, x). Uma vez por quadro ela e copiada para a PPU de um golpe so.
@@ -7114,6 +7126,8 @@ reset   subroutine
 
         lda #128
         sta naveX
+        lda #1
+        sta inimigoVivo         ; ele ja comeca cruzando
 
         ; Rolagem zerada. Sao duas escritas no mesmo registrador: a primeira e
         ; o x, a segunda o y. Sem isto a tela nasce deslocada, porque as
@@ -7161,6 +7175,8 @@ nmi     subroutine
         jsr moverNave
         jsr atirar
         jsr moverTiro
+        jsr moverInimigo
+        jsr colidir
         jsr montarSprites
 
         lda #0                  ; a rolagem se perde a cada quadro: reponha
@@ -7262,7 +7278,76 @@ moverTiro subroutine
 .fim    rts
 
 ; -----------------------------------------------------------------------------
-; Monta os dois sprites no rascunho: quatro bytes cada, nesta ordem
+; O inimigo cruza a tela; caido, conta os quadros ate voltar
+; -----------------------------------------------------------------------------
+moverInimigo subroutine
+        lda inimigoVivo
+        beq .caido
+
+        lda inimigoX
+        clc
+        adc #INIMIGO_VEL
+        sta inimigoX
+        cmp #248                ; saiu pela direita? volta pela esquerda
+        bcc .fim
+        lda #0
+        sta inimigoX
+        rts
+
+.caido  lda espera
+        beq .volta
+        dec espera
+        rts
+.volta  lda #1
+        sta inimigoVivo
+        lda #0
+        sta inimigoX            ; entra de novo pela esquerda
+.fim    rts
+
+; -----------------------------------------------------------------------------
+; O tiro acertou o inimigo?
+;
+; O NES tem deteccao de colisao no hardware, mas so para o sprite 0 contra o
+; fundo -- serve para dividir a tela, nao para isto. Entao a conta e no codigo,
+; e a mais barata que existe: se as duas caixas se encostam nos dois eixos,
+; bateu. Como o 6502 nao tem valor absoluto, a distancia sai da subtracao e, se
+; der negativo, do complemento de dois.
+; -----------------------------------------------------------------------------
+colidir subroutine
+        lda inimigoVivo
+        beq .fim                ; nao ha o que acertar
+        lda tiroY
+        beq .fim                ; nao ha tiro
+
+        lda tiroX               ; distancia horizontal
+        sec
+        sbc inimigoX
+        bcs .semSinal
+        eor #$FF                ; deu negativo: inverte o sinal
+        adc #1                  ; (o carry esta limpo aqui, entao isto e +1)
+.semSinal
+        cmp #PERTO
+        bcs .fim                ; longe demais de lado
+
+        lda tiroY               ; distancia vertical
+        sec
+        sbc #INIMIGO_Y
+        bcs .semSinal2
+        eor #$FF
+        adc #1
+.semSinal2
+        cmp #PERTO
+        bcs .fim                ; passou por cima ou ainda esta longe
+
+        lda #0                  ; acertou: os dois somem
+        sta inimigoVivo
+        sta tiroY
+        lda #INIMIGO_ESPERA
+        sta espera
+.fim    rts
+
+; -----------------------------------------------------------------------------
+; Monta os tres sprites no rascunho: quatro bytes cada, nesta ordem
 ; -----------------------------------------------------------------------------
 montarSprites subroutine
         lda #NAVE_Y
@@ -7280,7 +7365,7 @@ montarSprites subroutine
         bne .tem
         lda #$FF
         sta sprites+4
-        rts
+        jmp .inimigo            ; sem tiro, mas o inimigo continua la
 .tem    sta sprites+4           ; y
         lda #TIRO_TILE
         sta sprites+5
@@ -7288,6 +7373,24 @@ montarSprites subroutine
         sta sprites+6
         lda tiroX
         sta sprites+7           ; x
+
+.inimigo
+        ; O sprite 2 e o inimigo. O byte de atributo dele nao e mais zero: o 1
+        ; escolhe a segunda paleta de sprites, e e so por isso que ele tem cor
+        ; propria sem gastar tile nenhum a mais.
+        lda inimigoVivo
+        bne .vivo
+        lda #$FF
+        sta sprites+8
+        rts
+.vivo   lda #INIMIGO_Y
+        sta sprites+8           ; y
+        lda #INIMIGO_TILE
+        sta sprites+9
+        lda #1                  ; paleta 1 de sprites
+        sta sprites+10
+        lda inimigoX
+        sta sprites+11          ; x
         rts
 
 ; -----------------------------------------------------------------------------
@@ -7378,9 +7481,9 @@ paleta
         .byte $21,$0F,$1A,$2A
         .byte $21,$0F,$1A,$2A
         .byte $21,$0F,$1A,$2A
-        ; sprites
+        ; sprites -- a 0 e a nave, a 1 e o inimigo
         .byte $21,$30,$0F,$16   ; ceu, branco, preto, vermelho
-        .byte $21,$30,$0F,$16
+        .byte $21,$27,$0F,$14   ; ceu, laranja, preto, roxo
         .byte $21,$30,$0F,$16
         .byte $21,$30,$0F,$16
 
@@ -7425,7 +7528,7 @@ paleta
         .byte %00011000
         .byte %00000000
 
-        ; tile 3 vem depois da grama, la embaixo.
+        ; tiles 3 e 4 vem depois da grama, la embaixo.
 
         ; tile 2: grama. O plano de cima esta todo aceso, entao nenhum pixel
         ; cai na cor 0 (que seria o ceu vazando); o de baixo salpica os que
@@ -7462,6 +7565,26 @@ paleta
         .byte %00011000
         .byte %00011000
         .byte %00011000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+        .byte %00000000
+
+        ; tile 4: a nave inimiga, um disco. O plano de baixo desenha o corpo
+        ; inteiro (cor 1, o laranja da paleta 1); o de cima acende so a cupula,
+        ; que vira cor 3, o roxo.
+        .byte %00111100
+        .byte %01111110
+        .byte %11111111
+        .byte %11111111
+        .byte %01111110
+        .byte %00111100
+        .byte %01000010
+        .byte %00000000
+        .byte %00111100
+        .byte %00111100
+        .byte %00011000
+        .byte %00000000
         .byte %00000000
         .byte %00000000
         .byte %00000000

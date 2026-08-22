@@ -1734,7 +1734,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 13:34';
+const APP_BUILD = '2026-08-22 13:40';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -8215,10 +8215,45 @@ const TILES_PER_ROW = 16;
 const BANK_TILES = 512;  // 8192 / 16
 
 /* --- cabeçalho iNES -------------------------------------------------------- */
+/* Extensao .nes em arquivo que nao e ROM acontece direto -- fonte assembly,
+   ZIP, patch IPS. Vale dizer o que o arquivo e de verdade, em vez de so
+   reclamar do cabecalho que falta. */
+function oQueE(bytes) {
+  const inicia = txt => {
+    for (let i = 0; i < txt.length; i++) if (bytes[i] !== txt.charCodeAt(i)) return false;
+    return true;
+  };
+  if (inicia('PK')) return 'é um ZIP — descompacte antes';
+  if (inicia('PATCH')) return 'é um patch IPS, não a ROM';
+  if (inicia('UNIF')) return 'está no formato UNIF, que este editor não lê';
+  if (inicia('MZ')) return 'é um executável do Windows';
+
+  let texto = 0;
+  const olhar = Math.min(bytes.length, 512);
+  for (let i = 0; i < olhar; i++) {
+    const c = bytes[i];
+    if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127)) texto++;
+  }
+  if (olhar && texto / olhar > 0.95) {
+    let amostra = '';
+    for (let i = 0; i < olhar && i < 48; i++) {
+      const c = bytes[i];
+      if (c === 10 || c === 13) break;
+      amostra += String.fromCharCode(c);
+    }
+    return 'é texto, não uma ROM — parece código-fonte' +
+           (amostra.trim() ? ' («' + amostra.trim() + '…»)' : '');
+  }
+  return null;
+}
+
 function parseRom(bytes) {
   if (bytes.length < 16 || bytes[0] !== 0x4e || bytes[1] !== 0x45 ||
       bytes[2] !== 0x53 || bytes[3] !== 0x1a) {
-    throw new Error('não parece um arquivo .nes (faltou o "NES" no começo)');
+    const pista = oQueE(bytes);
+    throw new Error(pista
+      ? 'este arquivo ' + pista
+      : 'não parece um arquivo .nes (faltou o "NES" no começo)');
   }
   const prg16k = bytes[4], chr8k = bytes[5];
   const flags6 = bytes[6], flags7 = bytes[7];

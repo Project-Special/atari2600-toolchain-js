@@ -25,3 +25,8 @@ genemedic.asm
 
 # versoes antigas dos headers, guardadas so localmente
 *.orig
+
+# ROMs e programas de terceiros que voce largar aqui para testar ficam so na
+# sua maquina: .nes de jogos comerciais, e a pasta Arq_nes.
+*.nes
+Arq_nes/

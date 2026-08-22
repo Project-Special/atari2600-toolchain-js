@@ -97,15 +97,23 @@ const NES = (() => {
 
     function load(bytes) {
       const d = new Uint8Array(bytes);
-      if (d[0] !== 0x4e || d[1] !== 0x45 || d[2] !== 0x53 || d[3] !== 0x1a) {
+      if (d.length < 16 || d[0] !== 0x4e || d[1] !== 0x45 || d[2] !== 0x53 || d[3] !== 0x1a) {
         throw new Error('nao parece um arquivo iNES (faltou o "NES" no comeco)');
       }
-      const prg16k = d[4] || 1;
+      const prg16k = d[4];
       const chr8k = d[5];
       const flags6 = d[6], flags7 = d[7];
+      if ((flags7 & 0x0c) === 0x08) throw new Error('NES 2.0 ainda nao e suportado');
+      if (!prg16k) throw new Error('arquivo iNES sem bancos de PRG');
       mapper = (flags7 & 0xf0) | (flags6 >> 4);
-      mirroring = (flags6 & 8) ? 2 : (flags6 & 1);
+      if (!Object.prototype.hasOwnProperty.call(MAPPERS, mapper)) {
+        throw new Error('mapper ' + mapper + ' nao e suportado (suportados: ' + Object.keys(MAPPERS).join(', ') + ')');
+      }
+      if (flags6 & 8) throw new Error('espelhamento de quatro telas ainda nao e suportado');
+      mirroring = flags6 & 1;
       const trainer = (flags6 & 4) ? 512 : 0;
+      const needed = 16 + trainer + prg16k * 0x4000 + chr8k * 0x2000;
+      if (d.length < needed) throw new Error('arquivo iNES truncado: esperados ' + needed + ' bytes, vieram ' + d.length);
 
       let p = 16 + trainer;
       prg = d.slice(p, p + prg16k * 0x4000);

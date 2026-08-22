@@ -107,16 +107,32 @@ function checkEmbedded() {
 
   // dasm.js, vcs.js e nes.js vivem inteiros dentro do index.html, cada um sem a
   // sua linha final de module.exports
-  for (const name of ['dasm.js', 'vcs.js', 'nes.js']) {
-    const mod = fs.readFileSync(path.join(ROOT, 'tools', name), 'utf8')
-      .replace(/\r\n/g, '\n')
+  // Cada editor e um documento separado, entao o montador aparece duas vezes: o
+  // de Atari monta o .asm, o de NES remonta a linha reescrita no painel de
+  // codigo. Conferir so a primeira copia deixaria a outra envelhecer sem
+  // ninguem notar -- por isso a conta aqui e por <template>.
+  const limpo = t => t.replace(/\r\n/g, '\n');
+  const corpo = limpo(page);
+  const trecho = id => {
+    const m = corpo.match(new RegExp('<template id="' + id + '">([\\s\\S]*?)</template>'));
+    return m ? m[1] : '';
+  };
+  const ONDE = {
+    'dasm.js': ['src-atari', 'src-nes'],
+    'vcs.js': ['src-atari'],
+    'nes.js': ['src-nes'],
+  };
+  for (const name of Object.keys(ONDE)) {
+    const mod = limpo(fs.readFileSync(path.join(ROOT, 'tools', name), 'utf8'))
       .replace(/\nif \(typeof module[^\n]*\n/, '\n')
       .trim();
-    if (!page.replace(/\r\n/g, '\n').includes(mod)) {
+    const faltam = ONDE[name].filter(id => !trecho(id).includes(mod));
+    if (faltam.length) {
       bad++;
-      console.log('DIFERE ' + name + ' embutido no index.html está velho — reembuta a versão nova');
+      console.log('DIFERE ' + name + ' embutido está velho em ' + faltam.join(' e ') +
+                  ' — reembuta a versão nova');
     } else {
-      console.log('ok     ' + name.padEnd(12) + ' embutido igual no index.html');
+      console.log('ok     ' + name.padEnd(12) + ' embutido igual em ' + ONDE[name].join(' e '));
     }
   }
   return bad;

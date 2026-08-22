@@ -35,6 +35,30 @@ function build(name, source) {
   return r.rom;
 }
 
+function expectLoadError(what, bytes, expected) {
+  try {
+    NES.create().load(bytes);
+    check(what, false, 'aceitou o arquivo');
+  } catch (err) {
+    check(what, String(err.message).includes(expected), err.message);
+  }
+}
+
+function header(flags6, flags7) {
+  const bytes = new Uint8Array(16);
+  bytes.set([0x4e, 0x45, 0x53, 0x1a, 1, 0, flags6, flags7]);
+  return bytes;
+}
+
+/* O editor pode abrir CHR de ROM com mapper desconhecido, mas o nucleo nunca
+   deve executar uma ROM fora da lista: rodar como NROM produz erros silenciosos. */
+expectLoadError('recusa mapper nao suportado',
+  header(0x50, 0), 'mapper 5');
+expectLoadError('recusa espelhamento de quatro telas',
+  header(0x08, 0), 'quatro telas');
+expectLoadError('recusa arquivo iNES truncado',
+  Uint8Array.from([0x4e, 0x45, 0x53, 0x1a, 1, 0]), 'iNES');
+
 /* cor da paleta mestra, como o emulador entrega (0xRRGGBB) */
 const cor = i => NES.MASTER[i & 0x3f];
 
@@ -532,7 +556,7 @@ const SOM = `
         org $0000
         .byte "NES", $1A
         .byte 1
-        .byte 1
+        .byte 0
         .byte 0
         ds 9
 

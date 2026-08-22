@@ -1,4 +1,8 @@
 <title>TIA Sprite Bench</title>
+<!-- O icone da aba: a nave do Arq_asm/nave.asm, oito por oito pixels, em
+     branco sobre o azul da TIA. A grade de 8 divide certo em 16, 32 e 64,
+     entao o desenho sai com pixel inteiro em qualquer tamanho de aba. -->
+<link rel="icon" href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 8 8%22 shape-rendering=%22crispEdges%22><rect width=%228%22 height=%228%22 rx=%221%22 fill=%22%23183b9d%22/><g fill=%22%23ececec%22><rect x=%223%22 y=%221%22 width=%222%22 height=%222%22/><rect x=%222%22 y=%223%22 width=%224%22 height=%221%22/><rect x=%221%22 y=%224%22 width=%221%22 height=%221%22/><rect x=%223%22 y=%224%22 width=%222%22 height=%221%22/><rect x=%226%22 y=%224%22 width=%221%22 height=%221%22/><rect x=%220%22 y=%225%22 width=%228%22 height=%221%22/><rect x=%221%22 y=%226%22 width=%226%22 height=%221%22/><rect x=%222%22 y=%227%22 width=%224%22 height=%221%22/></g></svg>'>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -1648,7 +1652,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 10:24';
+const APP_BUILD = '2026-08-22 10:55';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),

@@ -1290,6 +1290,9 @@ body {
 .menubar { padding: 0; background: none; border: 0; }
 .menubar > button, .menubar .mtop { padding: 5px 10px; font-size: 13px; line-height: 1.4; }
 
+#cartInfo { font: 12px var(--mono); color: var(--muted); margin: 8px 0 14px; }
+#cartInfo b { color: var(--text); }
+
 main#stage {
   flex: 1; display: grid;
   grid-template-columns: minmax(240px, 320px) 1fr minmax(280px, 1fr);
@@ -1602,19 +1605,6 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
 <div class="tube off" id="tube">
     <div class="tube-inner" id="tubeInner">
       <canvas id="emuCanvas" width="160" height="240" aria-label="tela do Atari 2600"></canvas>
-      <div class="attract">
-        <div class="cart">
-          <div class="cart-rail"></div>
-          <div class="cart-name" id="cartName">nenhuma ROM</div>
-          <div class="cart-meta" id="cartMeta">compile um fonte para gerar o cartucho</div>
-        </div>
-        <button class="power" id="powerBig"><span class="glyph">&#9654;</span> Ligar o console</button>
-        <p class="hint">
-          <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> movem &middot;
-          <kbd>Espaço</kbd> atira &middot; <kbd>Enter</kbd> é o Reset do console &middot;
-          <kbd>Shift</kbd> é o Select
-        </p>
-      </div>
     </div>
 
     <div class="osd" id="osd">
@@ -1627,6 +1617,14 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
       <button class="btn" id="osdPause">Pausar</button>
       <button class="btn" id="osdExit">Sair</button>
     </div>
+  </div>
+
+  <!-- Debaixo da tela, nao dentro dela: o botao de ligar e a lista de teclas ja
+       moram no painel Console logo abaixo, e repetir os dois por cima da imagem
+       so tapava o emulador. -->
+  <div class="info" id="cartInfo">
+    <b id="cartName">nenhuma ROM</b> &middot;
+    <span id="cartMeta">compile um fonte para gerar o cartucho</span>
   </div>
 <section class="panel console-panel">
     <h2>Console</h2>
@@ -1835,7 +1833,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-23 10:04';
+const APP_BUILD = '2026-08-23 10:08';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -3163,7 +3161,7 @@ const MENUS = [
     label: 'Ver', ak: 'V', items: [
       { label: 'Sprites', check: () => view === 'sprites', run: () => showView('sprites') },
       { label: 'Código-fonte', accel: 'Ctrl+E', check: () => view === 'code', run: () => showView('code') },
-      { label: 'Ligar o console', accel: 'Shift+F5', run: () => $('#powerBig').click() },
+      { label: 'Ligar o console', accel: 'Shift+F5', run: () => $('#emuPower').click() },
       SEP,
       { label: 'Grade quadrada', check: () => S.aspect === 'square', run: () => { S.aspect = 'square'; render(); } },
       { label: 'Grade na proporção da TV', check: () => S.aspect === 'tv', run: () => { S.aspect = 'tv'; render(); } },
@@ -5946,7 +5944,15 @@ function emuResize() {
   // na janela, "preencher" usa a largura disponível do tubo; em tela cheia, a tela
   const availW = full ? window.innerWidth : Math.max(0, $('#tube').clientWidth - 36);
   const availH = full ? window.innerHeight : Math.round(emuCropH * emuScale);
-  const [w, h] = emuBox(availW, availH);
+  let [w, h] = emuBox(availW, availH);
+  /* O emulador agora mora numa coluna, nao mais numa visao de tela cheia: a
+     altura pedida pelo zoom pode dar uma largura maior do que a coluna tem, e a
+     imagem vazava por cima do painel do lado. Encolhe na mesma proporcao, seja
+     qual for a que estiver escolhida. */
+  if (!full && availW > 0 && w > availW) {
+    h = Math.round(h * availW / w);
+    w = availW;
+  }
   cv.style.width = w + 'px';
   cv.style.height = h + 'px';
 }
@@ -6180,7 +6186,7 @@ window.addEventListener('keyup', e => emuKey(e, false));
 
 /* --- controles da página --------------------------------------------------- */
 $('#emuPower').addEventListener('click', () => (emuOn ? emuPowerOff() : emuPowerOn()));
-$('#powerBig').addEventListener('click', emuPowerOn);
+$('#emuPower').addEventListener('click', emuPowerOn);
 $('#emuReset').addEventListener('click', emuReset);
 $('#emuPause').addEventListener('click', emuPause);
 

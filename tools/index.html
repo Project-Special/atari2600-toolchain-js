@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-23 10:29';
+const APP_BUILD = '2026-08-23 10:37';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2934,6 +2934,13 @@ async function openAsmPicker() {
   $('#asmFile').click();
 }
 
+/* Ha algo por gravar? O texto mexido a mao, ou algum sprite diferente do que
+   estava no arquivo. Serve para o titulo mostrar o ponto e para o compilar nao
+   escrever em disco a toa. */
+function temMudanca() {
+  return FILE.dirtyText || FILE.tables.some((_, i) => isDirty(i));
+}
+
 async function saveAsm(saveAs) {
   if (!hasFile()) { toast('nenhum arquivo aberto'); return; }
   applySprite(true);
@@ -3018,7 +3025,7 @@ function focusPaste() {
 
 /* --- title ---------------------------------------------------------------- */
 function updateTitle() {
-  const dirty = FILE.dirtyText || FILE.tables.some((_, i) => isDirty(i));
+  const dirty = temMudanca();
   $('#docname').textContent = FILE.name
     ? FILE.name + (dirty && !FILE.saved ? ' •' : '')
     : 'editor de player sprite para Atari 2600';
@@ -3067,7 +3074,10 @@ async function compile(run) {
   }
 
   applySprite(true);
-  if (CAN_FS && fileHandle) await saveAsm(false);   // disco e ROM combinando
+  /* Manter o disco combinando com a ROM so vale a pena quando ha o que gravar.
+     Gravar a cada compilada mexia no arquivo sem motivo -- e quando a permissao
+     do handle expira, vira um pedido de salvar no meio do caminho. */
+  if (CAN_FS && fileHandle && temMudanca()) await saveAsm(false);
 
   const t0 = performance.now();
   let res;
@@ -3101,7 +3111,9 @@ function finishBuild(res, ms, run) {
     $('#sbuild').title = 'montada nesta página em ' + ms + ' ms, ' + res.passes +
                          ' passes — Arquivo ▸ Salvar ROM grava em disco';
     emuLoadRom(res.rom, stem + '.bin', !!run);
-    if (run) showView('emu');
+    /* Nao troca de aba. O emulador mora na terceira coluna e ja esta a vista;
+       antes isto pulava para a visao dele, e depois que ela deixou de existir
+       o pulo passou a arrancar quem estava escrevendo na aba do fonte. */
     if (run) toast('ROM de ' + kb + ' KB — rodando no emulador', 4000, 'ok');
     else toast(stem + '.bin pronta — ' + res.size + ' bytes em ' + ms + ' ms', 4000, 'ok');
     if (warnings.length) {

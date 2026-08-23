@@ -47,10 +47,12 @@ node tools/vcs-test.js                 # testa o emulador de 2600
 node tools/nes-test.js                 # testa o emulador de NES
 ```
 
-Os dois editores abrem ROM pronta: o de NES pelo `Abrir .nes…`, o de Atari
-pelo `Abrir ROM…` — `.bin`, `.a26` ou `.rom`, de 2K a 32K, com o banco
-reconhecido pelo próprio emulador (flat, F8, F6, F4, E0, FE). Arrastar o
-arquivo para a página também vale nos dois.
+Nos dois editores o **Abrir…** aceita as duas coisas: um fonte `.asm` para
+escrever e montar, ou uma ROM pronta para mexer — `.nes` no NES, `.bin`/`.a26`
+de 2K a 32K no Atari, com o banco reconhecido pelo próprio emulador (flat, F8,
+F6, F4, E0, FE). Arrastar o arquivo para a página também vale. No NES quem
+decide não é a extensão e sim o cabeçalho: arquivo que começa com `NES` é ROM,
+venha com o nome que vier.
 
 ## O montador
 

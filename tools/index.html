@@ -1346,7 +1346,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
     <button data-view="code" role="tab" aria-selected="false">Código-fonte</button>
   </div>
   <span style="width:12px"></span>
-  <button class="btn" id="btAbrirRom">Abrir ROM…</button>
+  <button class="btn" id="btAbrirRom" title="um fonte .asm para editar e compilar, ou um cartucho .bin para rodar">Abrir…</button>
   <span style="width:12px"></span>
 <nav class="menubar" id="menubar" role="menubar" aria-label="Menu principal"></nav>
   <span class="spacer"></span>
@@ -1359,7 +1359,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
     <h2>Sprites</h2>
 <div class="filebar-head">
     <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt" hidden>
-    <input type="file" id="romFile" accept=".bin,.a26,.rom" hidden>
+    <input type="file" id="romFile" accept=".asm,.h,.s,.inc,.txt,.bin,.a26,.rom" hidden>
     <span class="fname" id="fname">nenhum arquivo aberto</span>
     <span class="fmeta" id="fmeta">Arquivo &#9656; Abrir .asm, ou arraste o arquivo para cá — toda tabela <code>.byte</code> vira uma miniatura clicável</span>
     <span class="spacer"></span>
@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-23 10:37';
+const APP_BUILD = '2026-08-23 11:48';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2364,9 +2364,13 @@ function abrirRom(file) {
 
 const EH_ROM = nome => /\.(bin|a26|rom)$/i.test(nome);
 
+/* Como no editor de NES, um Abrir so: fonte para editar, cartucho para rodar.
+   Quem decide e a extensao -- aqui nao ha cabecalho para olhar, porque a ROM de
+   2600 e byte cru do comeco ao fim. */
 $('#btAbrirRom').addEventListener('click', () => $('#romFile').click());
 $('#romFile').addEventListener('change', e => {
-  if (e.target.files[0]) abrirRom(e.target.files[0]);
+  const f = e.target.files[0];
+  if (f) (EH_ROM(f.name) ? abrirRom : openAsm)(f);
   e.target.value = '';
 });
 
@@ -7076,7 +7080,7 @@ details.hint[open] { margin-bottom: 4px; }
     <button data-aba="fonte">Fonte</button>
   </div>
   <span style="width:12px"></span>
-  <button id="btOpen">Abrir .nes…</button>
+  <button id="btOpen" title="uma ROM .nes para editar, ou um fonte .asm para montar">Abrir…</button>
   <button id="btSave" disabled>Salvar .nes</button>
   <span style="width:12px"></span>
   <button id="btRun" disabled>Rodar</button>
@@ -7170,13 +7174,13 @@ details.hint[open] { margin-bottom: 4px; }
 </main>
 
 <footer class="status">
-  <span id="msg">Abra um arquivo .nes, ou arraste ele para a página.</span>
+  <span id="msg">Abra um .nes para mexer nos tiles, ou um .asm para escrever — arrastar para a página também vale.</span>
   <span class="spacer"></span>
   <span id="ver"></span>
 </footer>
 
-<div class="drop" id="drop">solte o .nes aqui</div>
-<input type="file" id="file" accept=".nes" hidden>
+<div class="drop" id="drop">solte o .nes ou o .asm aqui</div>
+<input type="file" id="file" accept=".nes,.asm,.s,.inc,.txt" hidden>
 <input type="file" id="asmFile" accept=".asm,.s,.txt" hidden>
 
 <!-- o exemplo que a aba Fonte carrega; e o mesmo Arq_asm/nes-nave.asm -->
@@ -11427,13 +11431,58 @@ $('#file').addEventListener('change', e => {
   e.target.value = '';
 });
 
+/* Um Abrir so para as duas coisas.
+
+   Quem chega com um .asm quer escrever; quem chega com um .nes quer mexer nos
+   tiles. Ter um botao para cada obrigava a pessoa a saber de antemao qual era o
+   dela -- e o de fonte ficava escondido dentro da aba Fonte, entao na pratica
+   so existia o de ROM.
+
+   Nao e a extensao que decide: e o cabecalho. Arquivo que comeca com "NES" e
+   ROM, venha com o nome que vier; o resto vai para a aba Fonte. */
+function ehRom(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x4e && bytes[1] === 0x45 &&
+         bytes[2] === 0x53 && bytes[3] === 0x1a;
+}
+
 function readFile(f) {
   const r = new FileReader();
   r.onload = () => {
-    try { openRom(new Uint8Array(r.result), f.name); }
-    catch (err) { say(String(err.message || err), true); }
+    const bytes = new Uint8Array(r.result);
+    if (ehRom(bytes)) {
+      try {
+        openRom(bytes, f.name);
+        /* So aqui, nao dentro do openRom: montar na aba Fonte tambem chama
+           openRom, e trocar de aba ali arrancaria quem acabou de compilar. */
+        d_aba('tiles');
+      } catch (err) { say(String(err.message || err), true); }
+      return;
+    }
+    /* nao e ROM: se for texto, e fonte -- vai para a aba Fonte */
+    let texto = 0;
+    const olhar = Math.min(bytes.length, 512);
+    for (let i = 0; i < olhar; i++) {
+      const c = bytes[i];
+      if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127)) texto++;
+    }
+    if (!olhar || texto / olhar < 0.95) {
+      const pista = oQueE(bytes);
+      say(pista ? 'este arquivo ' + pista
+                : 'não é uma ROM .nes nem um fonte de texto', true);
+      return;
+    }
+    $('#fonte').value = new TextDecoder().decode(bytes);
+    $('#fnInfo').textContent = f.name + ' · ' + bytes.length + ' bytes';
+    d_aba('fonte');
+    say(f.name + ' aberto para editar — clique em Montar e rodar (ou Ctrl+Enter)');
   };
   r.readAsArrayBuffer(f);
+}
+
+/* troca de aba de fora do clique, para quem abre arquivo saber onde caiu */
+function d_aba(qual) {
+  const b = $('#abas button[data-aba="' + qual + '"]');
+  if (b) b.click();
 }
 
 $('#btSave').addEventListener('click', async () => {

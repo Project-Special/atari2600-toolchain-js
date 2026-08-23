@@ -1346,6 +1346,8 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
     <button data-view="code" role="tab" aria-selected="false">Código-fonte</button>
   </div>
   <span style="width:12px"></span>
+  <button class="btn" id="btAbrirRom">Abrir ROM…</button>
+  <span style="width:12px"></span>
 <nav class="menubar" id="menubar" role="menubar" aria-label="Menu principal"></nav>
   <span class="spacer"></span>
   <span class="sub" id="codeinfo"></span>
@@ -1357,6 +1359,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
     <h2>Sprites</h2>
 <div class="filebar-head">
     <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt" hidden>
+    <input type="file" id="romFile" accept=".bin,.a26,.rom" hidden>
     <span class="fname" id="fname">nenhum arquivo aberto</span>
     <span class="fmeta" id="fmeta">Arquivo &#9656; Abrir .asm, ou arraste o arquivo para cá — toda tabela <code>.byte</code> vira uma miniatura clicável</span>
     <span class="spacer"></span>
@@ -1833,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-23 10:08';
+const APP_BUILD = '2026-08-23 10:29';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2324,6 +2327,49 @@ function loadImage(file) {
   img.src = url;
 }
 
+/* --- abrir uma ROM pronta ------------------------------------------------------
+
+   Ate agora so dava para rodar o que este editor mesmo compilava, e nao havia
+   por onde abrir um cartucho que ja existe -- do lado do NES sempre houve. O
+   nucleo nao precisou de nada: ele ja reconhece o banco pelo tamanho e pelos
+   enderecos que a ROM acessa (flat, F8, F6, F4, E0, FE), que e o que separa um
+   jogo de 2K de um de 32K.
+
+   Nao ha o que editar aqui: sem o fonte, os bytes de sprite estao no meio do
+   codigo e nao ha como saber quais sao. Entao a ROM aberta vai direto para o
+   console e o resto do editor continua no que estiver aberto.
+------------------------------------------------------------------------------ */
+function abrirRom(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const bytes = new Uint8Array(rd.result);
+    if (!bytes.length || bytes.length > 65536) {
+      say('«' + file.name + '» tem ' + bytes.length + ' bytes — não parece um cartucho de 2600', 'error');
+      return;
+    }
+    if (bytes.length & (bytes.length - 1)) {
+      say('«' + file.name + '» tem ' + bytes.length + ' bytes; um cartucho tem 2K, 4K, 8K, 16K ou 32K', 'error');
+      return;
+    }
+    try {
+      emuLoadRom(bytes, file.name, true);
+      say(file.name + ' no console — ' + bytes.length + ' bytes');
+    } catch (err) {
+      say('não consegui rodar ' + file.name + ': ' + (err.message || err), 'error');
+    }
+  };
+  rd.onerror = () => say('não consegui ler ' + file.name, 'error');
+  rd.readAsArrayBuffer(file);
+}
+
+const EH_ROM = nome => /\.(bin|a26|rom)$/i.test(nome);
+
+$('#btAbrirRom').addEventListener('click', () => $('#romFile').click());
+$('#romFile').addEventListener('change', e => {
+  if (e.target.files[0]) abrirRom(e.target.files[0]);
+  e.target.value = '';
+});
+
 $('#pick').addEventListener('click', () => $('#file').click());
 $('#file').addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
 
@@ -2735,6 +2781,7 @@ window.addEventListener('drop', e => {
   document.body.classList.remove('dragging');
   const f = e.dataTransfer.files[0];
   if (/^image\//.test(f.type)) loadImage(f);
+  else if (EH_ROM(f.name)) abrirRom(f);
   else openAsm(f);
 });
 
@@ -3099,6 +3146,7 @@ const MENUS = [
   {
     label: 'Arquivo', ak: 'A', items: [
       { label: 'Abrir .asm…', accel: 'Ctrl+O', run: openAsmPicker },
+      { label: 'Abrir ROM (.bin)…', run: () => $('#romFile').click() },
       { label: 'Abrir imagem…', run: () => $('#file').click() },
       SEP,
       { label: 'Aplicar sprite ao código', accel: 'Ctrl+Enter', run: () => applySprite(false), on: hasTable },

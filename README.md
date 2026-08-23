@@ -47,6 +47,11 @@ node tools/vcs-test.js                 # testa o emulador de 2600
 node tools/nes-test.js                 # testa o emulador de NES
 ```
 
+Os dois editores abrem ROM pronta: o de NES pelo `Abrir .nes…`, o de Atari
+pelo `Abrir ROM…` — `.bin`, `.a26` ou `.rom`, de 2K a 32K, com o banco
+reconhecido pelo próprio emulador (flat, F8, F6, F4, E0, FE). Arrastar o
+arquivo para a página também vale nos dois.
+
 ## O montador
 
 `tools/dasm.js` fala o dialeto do DASM: `SEG`/`SEG.U`, `ORG` com preenchimento,

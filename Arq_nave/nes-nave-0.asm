@@ -256,7 +256,7 @@ limparRam subroutine
 
 ; -----------------------------------------------------------------------------
 ; A paleta mora em $3F00 dentro da PPU: 16 cores para o fundo, 16 para os
-; sprites. Escrever la e sempre a mesma dança -- endereco alto, endereco
+; sprites. Escrever la e sempre a mesma danÃ§a -- endereco alto, endereco
 ; baixo, e depois os bytes seguidos.
 ; -----------------------------------------------------------------------------
 carregarPaleta subroutine

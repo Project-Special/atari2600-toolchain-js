@@ -1112,6 +1112,7 @@ dialog footer {
   overflow-y: auto;
 }
 .filebar.shut .gallery { display: none; }
+#colSprites.shut .gallery { display: none; }   /* o "Recolher" agora e so da lista */
 
 .card {
   background: var(--raised);
@@ -1241,8 +1242,93 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
   transition: opacity 140ms linear, transform 140ms ease-out;
 }
 .toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
-</style>
 
+/* ===========================================================================
+   A moldura, igual a do editor de NES
+
+   Os dois editores sao documentos separados, mas quem usa nao tem por que
+   perceber isso: mesma barra em cima, mesma fileira de ferramentas, as mesmas
+   tres colunas separadas por um fio, e a mesma barra de estado embaixo. As
+   cores ja eram as mesmas; o que mudou foi o arranjo.
+
+   O corpo e uma coluna que ocupa a janela inteira e nao rola: quem rola sao as
+   colunas, cada uma por si. Assim o rodape fica sempre a vista, como la.
+   =========================================================================== */
+html, body { height: 100%%; }
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.bar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  flex: none;
+}
+.bar h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
+.bar .sub, .bar .stat { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+.tools {
+  display: flex; gap: 8px; padding: 8px 16px; background: var(--panel);
+  border-bottom: 1px solid var(--line); flex-wrap: wrap; align-items: center;
+  flex: none;
+}
+.tools .spacer { flex: 1; }
+.tools .sub { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+.abas { display: flex; gap: 2px; background: #1b2530; border: 1px solid var(--line);
+        border-radius: 6px; padding: 2px; }
+.abas button { border: 0; background: transparent; color: var(--muted); padding: 4px 12px;
+               border-radius: 4px; font: 600 12px var(--sans); cursor: pointer; }
+.abas button[aria-selected="true"] { background: #24303c; color: var(--text); }
+
+/* o menu entra na fileira de ferramentas, na altura dos botoes do outro editor */
+.menubar { padding: 0; background: none; border: 0; }
+.menubar > button, .menubar .mtop { padding: 5px 10px; font-size: 13px; line-height: 1.4; }
+
+main#stage {
+  flex: 1; display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr minmax(280px, 1fr);
+  gap: 1px; background: var(--line); overflow: hidden;
+  margin: 0; padding: 0; max-width: none;
+}
+main#stage > section {
+  background: var(--ground); padding: 12px; overflow: auto; min-width: 0;
+}
+main#stage > section > h2:first-child {
+  margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700;
+}
+/* Ja dentro de uma coluna, os paineis nao precisam mais de moldura propria --
+   duas bordas encaixadas viram sujeira. */
+main#stage > section .panel {
+  background: none; border: 0; border-radius: 0; padding: 0;
+  margin-bottom: 18px;
+}
+main#stage > section .col { display: block; }
+main#stage > section .panel h2 {
+  font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700; margin: 0 0 10px;
+}
+#colorPanel { grid-column: auto !important; }
+
+/* A aba de codigo ocupa o lugar das duas primeiras colunas, como no outro
+   editor -- o emulador fica a vista para compilar e ver na hora. */
+main#stage.modo-codigo { grid-template-columns: 1fr minmax(280px, 420px); }
+main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display: none; }
+.codeview { background: var(--ground); padding: 12px; overflow: auto; min-width: 0; }
+.codeview[hidden] { display: none; }
+
+/* o rodape sai de fixo e entra na coluna, como no editor de NES */
+.statusbar { position: static; flex: none; }
+
+.filebar-head { border: 0; padding: 0 0 8px; }
+.gallery { max-height: none; }
+</style>
 
 <header class="bar">
   <h1>Editor Emulador Atari</h1>
@@ -1251,10 +1337,22 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
   <span class="stat" id="stat"></span>
 </header>
 
+<div class="tools">
+  <div class="abas" id="tabs" role="tablist">
+    <button data-view="sprites" role="tab" aria-selected="true" class="on">Sprites</button>
+    <button data-view="code" role="tab" aria-selected="false">Código-fonte</button>
+  </div>
+  <span style="width:12px"></span>
 <nav class="menubar" id="menubar" role="menubar" aria-label="Menu principal"></nav>
+  <span class="spacer"></span>
+  <span class="sub" id="codeinfo"></span>
+</div>
 
-<section class="filebar shut" id="filebar">
-  <div class="filebar-head">
+<main id="stage">
+
+  <section id="colSprites">
+    <h2>Sprites</h2>
+<div class="filebar-head">
     <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt" hidden>
     <span class="fname" id="fname">nenhum arquivo aberto</span>
     <span class="fmeta" id="fmeta">Arquivo &#9656; Abrir .asm, ou arraste o arquivo para cá — toda tabela <code>.byte</code> vira uma miniatura clicável</span>
@@ -1266,156 +1364,11 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
     <button class="btn" id="copyFile" hidden>Copiar arquivo</button>
     <button class="btn" id="shutFile" hidden>Recolher</button>
   </div>
-  <div class="gallery" id="gallery"></div>
-</section>
-
-<div class="tabs" id="tabs" role="tablist">
-  <button data-view="sprites" role="tab" aria-selected="true">Sprites</button>
-  <button data-view="code" role="tab" aria-selected="false">Código-fonte</button>
-  <button data-view="emu" role="tab" aria-selected="false">Emulador</button>
-  <span class="tabinfo" id="codeinfo"></span>
-</div>
-
-<section class="emuview" id="emuview" hidden>
-  <div class="tube off" id="tube">
-    <div class="tube-inner" id="tubeInner">
-      <canvas id="emuCanvas" width="160" height="240" aria-label="tela do Atari 2600"></canvas>
-      <div class="attract">
-        <div class="cart">
-          <div class="cart-rail"></div>
-          <div class="cart-name" id="cartName">nenhuma ROM</div>
-          <div class="cart-meta" id="cartMeta">compile um fonte para gerar o cartucho</div>
-        </div>
-        <button class="power" id="powerBig"><span class="glyph">&#9654;</span> Ligar o console</button>
-        <p class="hint">
-          <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> movem &middot;
-          <kbd>Espaço</kbd> atira &middot; <kbd>Enter</kbd> é o Reset do console &middot;
-          <kbd>Shift</kbd> é o Select
-        </p>
-      </div>
-    </div>
-
-    <div class="osd" id="osd">
-      <span class="osd-label">Proporção</span>
-      <div class="seg" id="osdAspect">
-        <button data-aspect="43" aria-pressed="true">4:3</button>
-        <button data-aspect="square" aria-pressed="false">1:1</button>
-        <button data-aspect="fill" aria-pressed="false">Preencher</button>
-      </div>
-      <button class="btn" id="osdPause">Pausar</button>
-      <button class="btn" id="osdExit">Sair</button>
-    </div>
-  </div>
-
-  <section class="panel console-panel">
-    <h2>Console</h2>
-
-    <div class="row">
-      <span class="lbl">Energia</span>
-      <div class="grp">
-        <button class="btn" id="emuPower">Ligar</button>
-        <button class="btn" id="emuPause" disabled>Pausar</button>
-        <button class="btn" id="emuReset" disabled title="recarrega a ROM do zero">Reiniciar</button>
-      </div>
-    </div>
-
-    <div class="row">
-      <span class="lbl">Painel</span>
-      <div class="grp switch-row">
-        <button class="btn" id="emuSelect" disabled>Select</button>
-        <button class="btn" id="emuStart" disabled>Reset</button>
-      </div>
-    </div>
-
-    <div class="row">
-      <span class="lbl">Tela</span>
-      <div class="grp">
-        <select id="emuScale">
-          <option value="2">2&times;</option>
-          <option value="3" selected>3&times;</option>
-          <option value="4">4&times;</option>
-        </select>
-        <button class="btn" id="emuFull">Tela cheia</button>
-      </div>
-    </div>
-
-    <div class="row">
-      <span class="lbl">Proporção</span>
-      <div class="grp">
-        <div class="seg" id="emuAspect">
-          <button data-aspect="43" aria-pressed="true" title="geometria de um tubo 4:3">4:3</button>
-          <button data-aspect="square" aria-pressed="false" title="pixel quadrado">1:1</button>
-          <button data-aspect="fill" aria-pressed="false" title="estica para ocupar a tela toda">Preencher</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="row">
-      <span class="lbl">&nbsp;</span>
-      <div class="grp">
-        <label class="check"><input type="checkbox" id="emuCrop" checked title="esconde as linhas de VBLANK, como uma TV faz"> Cortar bordas</label>
-        <label class="check"><input type="checkbox" id="emuCrt" checked> Máscara de CRT</label>
-        <label class="check"><input type="checkbox" id="emuMute" checked> Som</label>
-      </div>
-    </div>
-
-    <div class="row">
-      <span class="lbl">Estado</span>
-      <div class="grp meter">
-        <span id="emuState">sem ROM</span> ·
-        <b id="emuFps">0</b> fps ·
-        <b id="emuLines">0</b> linhas
-      </div>
-    </div>
-
-    <h2 style="margin-top:16px">Teclas</h2>
-    <dl class="keys">
-      <dt>← ↑ ↓ →</dt><dd>joystick esquerdo (ou W A S D)</dd>
-      <dt>Espaço / Z</dt><dd>botão de tiro</dd>
-      <dt>Enter</dt><dd>Game Reset do console</dd>
-      <dt>Shift</dt><dd>Game Select</dd>
-      <dt>T / P / F</dt><dd>proporção, pausa e tela cheia — funcionam com a tela cheia aberta</dd>
-    </dl>
-
-    <p class="note">
-      Emulador próprio: CPU 6507, TIA e RIOT 6532 rodando em lockstep com o color
-      clock. <code>Shift+F5</code> compila e já joga o cartucho aqui dentro.
-    </p>
+<div class="gallery" id="gallery"></div>
   </section>
-</section>
 
-<section class="codeview" id="codeview" hidden>
-  <div class="row">
-    <span class="lbl">Ir para</span>
-    <div class="grp">
-      <input type="number" id="lineNo" min="1" value="1" title="número da linha">
-      <button class="btn" id="goLine">Linha</button>
-      <input type="search" id="find" placeholder="procurar no fonte">
-      <button class="btn" id="findNext">Procurar</button>
-      <button class="btn" id="toSprite" title="abre a tabela .byte onde o cursor está">Editar como sprite</button>
-    </div>
-  </div>
-
-  <div class="pad">
-    <pre class="gutter" id="gutter" aria-hidden="true"></pre>
-    <div class="slab">
-      <pre class="hl" id="hl" aria-hidden="true"></pre>
-      <textarea id="src" spellcheck="false" autocomplete="off" autocapitalize="off"
-                aria-label="código-fonte do jogo"></textarea>
-    </div>
-  </div>
-
-  <p class="note">
-    O texto aqui é o <code>.asm</code> com os sprites já aplicados. Editar o
-    código e editar sprites são a mesma coisa vista de dois jeitos — ao voltar
-    para a aba Sprites, o fonte é relido e a galeria se refaz.
-  </p>
-</section>
-
-<main class="stage" id="stage">
-
-  <!-- ------------------------------------------------------------- editor -->
-  <section class="panel" id="editorPanel">
+  <section id="colDesenho">
+<section class="panel" id="editorPanel">
     <h2>Desenho &mdash; 8 clocks &times; <span id="hLabel">16</span> scanlines</h2>
 
     <div class="editor-wrap">
@@ -1468,8 +1421,7 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
       clocks &mdash; o bit&nbsp;7 é o pixel da esquerda.
     </p>
   </section>
-
-  <div class="col">
+<div class="col">
   <!-- ------------------------------------------------------------ preview -->
   <section class="panel view">
     <h2>Como fica no jogo</h2>
@@ -1555,9 +1507,7 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
     </div>
   </section>
   </div>
-
-  <!-- ------------------------------------------------------------ palette -->
-  <section class="panel">
+<section class="panel">
     <h2>Cores</h2>
 
     <div class="targets" id="targets">
@@ -1605,9 +1555,7 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
       </p>
     </div>
   </section>
-
-  <!-- --------------------------------------------------------------- cores -->
-  <section class="panel" id="colorPanel" style="grid-column: 1 / -1">
+<section class="panel" id="colorPanel" style="grid-column: 1 / -1">
     <h2>Cores do jogo &mdash; <span id="colorCount"></span></h2>
     <div id="colorList"></div>
     <p class="note">
@@ -1619,6 +1567,144 @@ textarea.in { width: 100%; resize: vertical; white-space: pre; }
       ali mesmo e a linha do fonte é reescrita; depois <code>F5</code>.
     </p>
   </section>
+  </section>
+
+<section class="codeview" id="codeview" hidden>
+  <div class="row">
+    <span class="lbl">Ir para</span>
+    <div class="grp">
+      <input type="number" id="lineNo" min="1" value="1" title="número da linha">
+      <button class="btn" id="goLine">Linha</button>
+      <input type="search" id="find" placeholder="procurar no fonte">
+      <button class="btn" id="findNext">Procurar</button>
+      <button class="btn" id="toSprite" title="abre a tabela .byte onde o cursor está">Editar como sprite</button>
+    </div>
+  </div>
+
+  <div class="pad">
+    <pre class="gutter" id="gutter" aria-hidden="true"></pre>
+    <div class="slab">
+      <pre class="hl" id="hl" aria-hidden="true"></pre>
+      <textarea id="src" spellcheck="false" autocomplete="off" autocapitalize="off"
+                aria-label="código-fonte do jogo"></textarea>
+    </div>
+  </div>
+
+  <p class="note">
+    O texto aqui é o <code>.asm</code> com os sprites já aplicados. Editar o
+    código e editar sprites são a mesma coisa vista de dois jeitos — ao voltar
+    para a aba Sprites, o fonte é relido e a galeria se refaz.
+  </p>
+</section>
+
+  <section id="colEmu">
+    <h2>Emulador</h2>
+<div class="tube off" id="tube">
+    <div class="tube-inner" id="tubeInner">
+      <canvas id="emuCanvas" width="160" height="240" aria-label="tela do Atari 2600"></canvas>
+      <div class="attract">
+        <div class="cart">
+          <div class="cart-rail"></div>
+          <div class="cart-name" id="cartName">nenhuma ROM</div>
+          <div class="cart-meta" id="cartMeta">compile um fonte para gerar o cartucho</div>
+        </div>
+        <button class="power" id="powerBig"><span class="glyph">&#9654;</span> Ligar o console</button>
+        <p class="hint">
+          <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> movem &middot;
+          <kbd>Espaço</kbd> atira &middot; <kbd>Enter</kbd> é o Reset do console &middot;
+          <kbd>Shift</kbd> é o Select
+        </p>
+      </div>
+    </div>
+
+    <div class="osd" id="osd">
+      <span class="osd-label">Proporção</span>
+      <div class="seg" id="osdAspect">
+        <button data-aspect="43" aria-pressed="true">4:3</button>
+        <button data-aspect="square" aria-pressed="false">1:1</button>
+        <button data-aspect="fill" aria-pressed="false">Preencher</button>
+      </div>
+      <button class="btn" id="osdPause">Pausar</button>
+      <button class="btn" id="osdExit">Sair</button>
+    </div>
+  </div>
+<section class="panel console-panel">
+    <h2>Console</h2>
+
+    <div class="row">
+      <span class="lbl">Energia</span>
+      <div class="grp">
+        <button class="btn" id="emuPower">Ligar</button>
+        <button class="btn" id="emuPause" disabled>Pausar</button>
+        <button class="btn" id="emuReset" disabled title="recarrega a ROM do zero">Reiniciar</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Painel</span>
+      <div class="grp switch-row">
+        <button class="btn" id="emuSelect" disabled>Select</button>
+        <button class="btn" id="emuStart" disabled>Reset</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Tela</span>
+      <div class="grp">
+        <select id="emuScale">
+          <option value="2">2&times;</option>
+          <option value="3" selected>3&times;</option>
+          <option value="4">4&times;</option>
+        </select>
+        <button class="btn" id="emuFull">Tela cheia</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Proporção</span>
+      <div class="grp">
+        <div class="seg" id="emuAspect">
+          <button data-aspect="43" aria-pressed="true" title="geometria de um tubo 4:3">4:3</button>
+          <button data-aspect="square" aria-pressed="false" title="pixel quadrado">1:1</button>
+          <button data-aspect="fill" aria-pressed="false" title="estica para ocupar a tela toda">Preencher</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">&nbsp;</span>
+      <div class="grp">
+        <label class="check"><input type="checkbox" id="emuCrop" checked title="esconde as linhas de VBLANK, como uma TV faz"> Cortar bordas</label>
+        <label class="check"><input type="checkbox" id="emuCrt" checked> Máscara de CRT</label>
+        <label class="check"><input type="checkbox" id="emuMute" checked> Som</label>
+      </div>
+    </div>
+
+    <div class="row">
+      <span class="lbl">Estado</span>
+      <div class="grp meter">
+        <span id="emuState">sem ROM</span> ·
+        <b id="emuFps">0</b> fps ·
+        <b id="emuLines">0</b> linhas
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">Teclas</h2>
+    <dl class="keys">
+      <dt>← ↑ ↓ →</dt><dd>joystick esquerdo (ou W A S D)</dd>
+      <dt>Espaço / Z</dt><dd>botão de tiro</dd>
+      <dt>Enter</dt><dd>Game Reset do console</dd>
+      <dt>Shift</dt><dd>Game Select</dd>
+      <dt>T / P / F</dt><dd>proporção, pausa e tela cheia — funcionam com a tela cheia aberta</dd>
+    </dl>
+
+    <p class="note">
+      Emulador próprio: CPU 6507, TIA e RIOT 6532 rodando em lockstep com o color
+      clock. <code>Shift+F5</code> compila e já joga o cartucho aqui dentro.
+    </p>
+  </section>
+  </section>
+
 </main>
 
 <dialog id="dlgBuild">
@@ -1749,7 +1835,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-22 18:36';
+const APP_BUILD = '2026-08-23 10:04';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2608,7 +2694,7 @@ function openAsm(file) {
     FILE.saved = true;
     FILE.dirtyText = false;
     $('#fname').textContent = file.name;
-    $('#filebar').classList.remove('shut');
+    $('#colSprites').classList.remove('shut');
     $('#shutFile').textContent = 'Recolher';
     ['#search', '#allWrap', '#prevT', '#nextT', '#copyFile', '#shutFile']
       .forEach(sel => { $(sel).hidden = false; });
@@ -2626,7 +2712,7 @@ $('#asmFile').addEventListener('change', e => { if (e.target.files[0]) openAsm(e
 $('#search').addEventListener('input', e => { FILE.filter = e.target.value; renderGallery(); });
 $('#onlyGfx').addEventListener('change', renderGallery);
 $('#shutFile').addEventListener('click', () => {
-  const bar = $('#filebar');
+  const bar = $('#colSprites');
   bar.classList.toggle('shut');
   $('#shutFile').textContent = bar.classList.contains('shut') ? 'Mostrar' : 'Recolher';
 });
@@ -2856,7 +2942,7 @@ function closeAsm() {
   $('#fmeta').textContent = 'Arquivo ▸ Abrir .asm, ou arraste o arquivo para cá';
   ['#search', '#allWrap', '#prevT', '#nextT', '#copyFile', '#shutFile']
     .forEach(sel => { $(sel).hidden = true; });
-  $('#filebar').classList.add('shut');
+  $('#colSprites').classList.add('shut');
   updateTitle();
   toast('arquivo fechado');
 }
@@ -3077,7 +3163,7 @@ const MENUS = [
     label: 'Ver', ak: 'V', items: [
       { label: 'Sprites', check: () => view === 'sprites', run: () => showView('sprites') },
       { label: 'Código-fonte', accel: 'Ctrl+E', check: () => view === 'code', run: () => showView('code') },
-      { label: 'Emulador', accel: 'Shift+F5', check: () => view === 'emu', run: () => showView('emu') },
+      { label: 'Ligar o console', accel: 'Shift+F5', run: () => $('#powerBig').click() },
       SEP,
       { label: 'Grade quadrada', check: () => S.aspect === 'square', run: () => { S.aspect = 'square'; render(); } },
       { label: 'Grade na proporção da TV', check: () => S.aspect === 'tv', run: () => { S.aspect = 'tv'; render(); } },
@@ -3088,7 +3174,7 @@ const MENUS = [
       { label: 'Scanlines', check: () => isChecked('#crt'), run: () => setCheck('#crt', !isChecked('#crt')) },
       { label: 'Chão', check: () => isChecked('#ground'), run: () => setCheck('#ground', !isChecked('#ground')) },
       SEP,
-      { label: 'Galeria do arquivo', check: () => !$('#filebar').classList.contains('shut'),
+      { label: 'Galeria do arquivo', check: () => !$('#colSprites').classList.contains('shut'),
         run: () => $('#shutFile').click(), on: hasFile },
       { label: 'Só o que parece sprite', check: () => isChecked('#onlyGfx'),
         run: () => setCheck('#onlyGfx', !isChecked('#onlyGfx')), on: hasFile },
@@ -3343,20 +3429,23 @@ function gotoLine(n, select) {
 
 /* --- trocar de aba -------------------------------------------------------- */
 function showView(next) {
+  /* O emulador nao e mais uma visao: ele mora na terceira coluna e fica sempre
+     a vista, como no editor de NES. Quem pedir 'emu' -- pelo menu ou pelo
+     Shift+F5 -- cai na de sprites, que e onde ele esta. */
+  if (next === 'emu') next = 'sprites';
   if (next === view) return;
   if (view === 'code') absorbCode();
 
   view = next;
-  $('#stage').hidden = next !== 'sprites';
+  $('#stage').classList.toggle('modo-codigo', next === 'code');
+  $('#colSprites').hidden = next === 'code';
+  $('#colDesenho').hidden = next === 'code';
   $('#codeview').hidden = next !== 'code';
-  $('#emuview').hidden = next !== 'emu';
-  if (next === 'emu') { emuResize(); if (!emuOn) attractStart(); }
-  else attractStop();
+  emuResize();
+  if (!emuOn) attractStart(); else attractStop();
   $$('#tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === next)));
 
-  if (next === 'emu') {
-    say(emuRom ? emuRomName + ' pronto — ligue o console' : 'compile um fonte para gerar o cartucho');
-  } else if (next === 'code') {
+  if (next === 'code') {
     src().value = hasFile() ? buildFile() : buildCode();
     codeDirty = false;
     paintCode();

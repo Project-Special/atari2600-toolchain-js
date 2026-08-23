@@ -951,6 +951,120 @@ function testaExemplos() {
   for (const f of fontes) testaExemplo(f);
 }
 
+/* ---------------------------------------------------------------------------
+   O plataforma
+
+   A serie nes-salto-N e um jogo de plataforma escrito do zero. O que da para
+   medir sem olhar e justamente o que faz um plataforma funcionar: o boneco fica
+   em pe no chao, o pulo tem altura variavel conforme quanto tempo o botao fica
+   apertado, nao da para pular no ar, e a fase e atravessavel.
+
+   Esse ultimo caso e o mais valioso: um robo segura a direita e pula quando
+   trava. Se ele cruzar a tela, a fisica, a colisao e o desenho da fase estao
+   todos de pe ao mesmo tempo.
+   --------------------------------------------------------------------------- */
+function testaSalto() {
+  const caminho = path.join(__dirname, '..', 'Arq_salto', 'nes-salto-0.asm');
+  if (!fs.existsSync(caminho)) { check('o nes-salto-0.asm existe', false, caminho); return; }
+
+  const r = DASM.assemble({ name: 'nes-salto-0.asm', source: fs.readFileSync(caminho, 'utf8') });
+  if (!r.ok) {
+    const e = r.problems.filter(p => p.kind === 'error');
+    check('nes-salto-0 monta', false, e.slice(0, 2).map(p => p.line + ': ' + p.message).join(' | '));
+    return;
+  }
+  check('nes-salto-0 monta', true, r.size + ' bytes, ' + r.symbols.length + ' símbolos');
+
+  /* O cenario usa branco, mas nao usa preto: a cor 2 da paleta de sprites e
+     $0F, que nao aparece na paleta de fundo. Entao o preto e o boneco. */
+  const PRETO = cor(0x0f);
+  const novaMaquina = () => { const n = NES.create(); n.load(r.rom); return n; };
+  const acharBoneco = tela => {
+    for (let y = 0; y < 240; y++) {
+      for (let x = 0; x < 256; x++) if (tela.pixels[y * 256 + x] === PRETO) return { x, y };
+    }
+    return null;
+  };
+
+  let n = novaMaquina();
+  let tela;
+  for (let f = 0; f < 40; f++) tela = n.frame();
+  const nasceu = acharBoneco(tela);
+  check('o boneco aparece na fase', !!nasceu, nasceu ? 'x=' + nasceu.x + ' y=' + nasceu.y : 'não achei');
+  if (!nasceu) return;
+
+  /* Parado, ele nao pode afundar nem tremer: se a sonda de chao ficasse um
+     pixel acima do piso, o y oscilaria de quadro em quadro -- e era isso que
+     fazia o pulo sair so as vezes. */
+  const alturas = new Set();
+  for (let f = 0; f < 30; f++) { tela = n.frame(); alturas.add(acharBoneco(tela).y); }
+  check('parado, ele fica firme no chão', alturas.size === 1,
+    [...alturas].join(', '));
+
+  /* a altura do pulo tem que crescer com o tempo de botao */
+  function pulo(quadrosSegurando) {
+    const m = novaMaquina();
+    let t;
+    for (let f = 0; f < 30; f++) t = m.frame();
+    const chao = acharBoneco(t).y;
+    let topo = chao;
+    m.setButton(0, 'a', true);
+    for (let f = 0; f < 50; f++) {
+      if (f === quadrosSegurando) m.setButton(0, 'a', false);
+      t = m.frame();
+      const q = acharBoneco(t);
+      if (q && q.y < topo) topo = q.y;
+    }
+    return chao - topo;
+  }
+  const toque = pulo(1), medio = pulo(6), cheio = pulo(40);
+  check('um toque no A dá um pulinho', toque > 2 && toque < 12, toque + ' px');
+  check('segurar mais sobe mais', medio > toque && cheio > medio,
+    toque + ' -> ' + medio + ' -> ' + cheio + ' px');
+  check('e o pulo tem um teto', cheio <= 48, cheio + ' px (uns seis tiles)');
+
+  /* nao pode pular de novo no ar */
+  {
+    const m = novaMaquina();
+    let t;
+    for (let f = 0; f < 30; f++) t = m.frame();
+    m.setButton(0, 'a', true);
+    for (let f = 0; f < 6; f++) t = m.frame();
+    m.setButton(0, 'a', false);
+    for (let f = 0; f < 4; f++) t = m.frame();
+    const subindoAinda = acharBoneco(t).y;
+    m.setButton(0, 'a', true);                 // aperta de novo, no ar
+    for (let f = 0; f < 12; f++) t = m.frame();
+    const depois = acharBoneco(t).y;
+    m.setButton(0, 'a', false);
+    check('não dá para pular no ar', depois > subindoAinda,
+      'y ' + subindoAinda + ' -> ' + depois + ' (maior = desceu)');
+  }
+
+  /* e o teste que vale por todos: um robo atravessa a fase */
+  {
+    const m = novaMaquina();
+    let t;
+    for (let f = 0; f < 30; f++) t = m.frame();
+    let travado = 0, ultimo = acharBoneco(t).x, maior = ultimo, pulos = 0;
+    m.setButton(0, 'right', true);
+    for (let f = 0; f < 900; f++) {
+      const q = acharBoneco(t);
+      if (q) {
+        if (q.x > maior) maior = q.x;
+        travado = Math.abs(q.x - ultimo) < 1 ? travado + 1 : 0;
+        ultimo = q.x;
+        if (travado === 0) m.setButton(0, 'a', false);
+        if (travado === 6) { m.setButton(0, 'a', true); pulos++; }
+        if (travado === 34) { m.setButton(0, 'a', false); travado = 0; }
+      }
+      t = m.frame();
+    }
+    check('um robô atravessa a fase pulando', maior > 200,
+      'chegou a x=' + maior + ' de 255, com ' + pulos + ' pulo(s)');
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 testaCabecalho();
 testaTela();
@@ -959,6 +1073,7 @@ testaSprite0();
 testaMmc3();
 testaApu();
 testaExemplos();
+testaSalto();
 
 console.log(bad ? bad + ' caso(s) falhando' : 'emulador de NES ok');
 process.exit(bad ? 1 : 0);

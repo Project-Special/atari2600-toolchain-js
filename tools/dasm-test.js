@@ -49,7 +49,7 @@ const ehNes = arquivo => {
 
 function acharFontes() {
   const achados = [], nes = [];
-  for (const dir of ['Arq_asm', 'Arq_nave', '.']) {
+  for (const dir of ['Arq_asm', 'Arq_nave', 'Arq_salto', '.']) {
     const cheio = path.join(ROOT, dir);
     let nomes = [];
     try { nomes = fs.readdirSync(cheio); } catch (err) { continue; }

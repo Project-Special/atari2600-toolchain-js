@@ -165,6 +165,22 @@ no NES:
 | `nes-nave-2.asm` | agora há o que derrubar: uma nave inimiga cruza o alto, o tiro a abate e ela volta pela borda depois de um tempo. A colisão é conta de caixa feita no código — o NES só tem detecção de hardware para o sprite 0, e ela não serve para isto. O inimigo usa a paleta 1 de sprites, que é o que o byte de atributo escolhe |
 | `nes-nave-3.asm` | com som: o tiro é um pulso que cai de tom pela varredura da APU, a explosão é um estouro no canal de ruído morrendo pelo envelope. Os dois são cinco escritas cada e mais nada — quem toca é o hardware, não uma rotina andando junto com o jogo |
 
+E em `Arq_salto/`, um jogo de plataforma:
+
+| | O que é |
+|---|---|
+| `nes-salto-0.asm` | física de plataforma com posição e velocidade em ponto fixo 8.8, pulo de altura variável conforme quanto tempo o botão fica apertado, colisão contra o mapa de tiles resolvida em X e depois em Y, e uma fase de 960 bytes que serve tanto para desenhar o fundo quanto para a colisão consultar |
+
+A fase mora em `Arq_salto/fase.txt`, num formato que dá para editar com o olho —
+30 linhas de 32 caracteres, um por tile, em hexa. `node tools/salto-mapa.js` a
+traduz para as linhas de `.byte` dentro do fonte; `--conferir` só valida. Tiles
+0 a 3 se atravessa, 4 em diante é parede, e essa divisão está na colisão do jogo.
+
+Tudo autoral — arte, fase e mecânica. O que ele tem em comum com os plataformas
+clássicos é o que não pertence a ninguém: a mecânica. Correr com inércia, pular
+mais alto segurando o botão, cair e bater no cenário são ideias, e ideia não tem
+dono; os desenhos, as fases e os personagens de um jogo comercial têm.
+
 A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
 novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
 depois do outro e ver exatamente o que mudou — inclusive com `diff`, que é a

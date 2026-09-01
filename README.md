@@ -47,6 +47,13 @@ node tools/vcs-test.js                 # testa o emulador de 2600
 node tools/nes-test.js                 # testa o emulador de NES
 ```
 
+Abrindo um cartucho de 2600, a coluna Sprites mostra a ROM inteira fatiada em
+blocos de 16 bytes, cada um desenhado como imagem — é assim que se acha gráfico
+num cartucho, porque o 2600 não separa desenho de código como o NES separa. O
+filtro *Só o que parece sprite* julga os bytes: bits em blocos e linhas
+parecidas com a de cima passam, chuvisco não. Num Pitfall isso deixa 45 dos 256
+blocos. Desenhar grava no cartucho que está no console — *Reiniciar* mostra.
+
 Nos dois editores o **Abrir…** aceita as duas coisas: um fonte `.asm` para
 escrever e montar, ou uma ROM pronta para mexer — `.nes` no NES, `.bin`/`.a26`
 de 2K a 32K no Atari, com o banco reconhecido pelo próprio emulador (flat, F8,

@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-09-01 19:20';
+const APP_BUILD = '2026-09-01 19:31';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2387,6 +2387,68 @@ function ehRomDeNes(bytes) {
          bytes[2] === 0x53 && bytes[3] === 0x1a;
 }
 
+/* --- ver os sprites de um cartucho --------------------------------------------
+
+   O NES guarda o desenho separado do codigo, numa area propria: por isso o
+   editor de la lista os 512 tiles e pronto. O 2600 nao tem isso. Os bytes de
+   sprite moram no meio das instrucoes, e nada no arquivo diz quais sao quais --
+   e o mesmo motivo pelo qual nao existe "extrair os graficos" de um cartucho de
+   2600 sem alguem olhar.
+
+   O que da para fazer e o que sempre se fez: mostrar a ROM inteira como imagem e
+   deixar o olho achar. Sprite salta a vista -- tem simetria, borda, e uma coluna
+   de zeros dos lados; codigo parece chuvisco. Entao a ROM entra aqui fatiada em
+   blocos de 16 bytes, cada um uma tabela .byte, e a galeria mostra todos. O
+   filtro "So o que parece sprite", que ja existia para fonte, serve igual aqui.
+
+   O rotulo de cada bloco guarda a posicao dele no arquivo, e e por ele que a
+   edicao sabe onde gravar de volta.
+------------------------------------------------------------------------------ */
+const BLOCO = 16;                    // bytes por bloco -- a altura tipica de um
+
+function romComoFonte(bytes, nome) {
+  const hx = (v, n) => v.toString(16).toUpperCase().padStart(n, '0');
+  const linhas = [
+    '; ' + '='.repeat(76),
+    '; ' + nome + ' -- ' + bytes.length + ' bytes, aberto como dados',
+    ';',
+    '; Um cartucho de 2600 nao separa desenho de codigo. Estes blocos sao a ROM',
+    '; inteira fatiada de ' + BLOCO + ' em ' + BLOCO + ' bytes; passe o olho na galeria e o',
+    '; sprite aparece. Marque "So o que parece sprite" para esconder o chuvisco.',
+    ';',
+    '; A fatia e fixa, entao um sprite pode cair partido entre dois blocos --',
+    '; nao ha como saber onde ele comeca sem alguem olhar.',
+    ';',
+    '; Desenhando, os bytes vao para o cartucho que esta no console. Reiniciar',
+    '; mostra a mudanca rodando, e Arquivo > Salvar ROM grava o arquivo novo.',
+    '; ' + '='.repeat(76),
+    '',
+    '        processor 6502',
+    '',
+  ];
+  for (let off = 0; off < bytes.length; off += BLOCO) {
+    const n = Math.min(BLOCO, bytes.length - off);
+    linhas.push('B_' + hx(off, 4));
+    for (let i = 0; i < n; i++) {
+      const b = bytes[off + i];
+      /* Um byte por linha, em binario, com o desenho ao lado: e assim que se
+         escreve sprite a mao -- e e o que o resto do editor reconhece como
+         tabela de desenho em vez de dado solto. */
+      let arte = '';
+      for (let k = 7; k >= 0; k--) arte += (b >> k) & 1 ? 'X' : ' ';
+      linhas.push('        .byte %' + b.toString(2).padStart(8, '0') + ' ; |' + arte + '|');
+    }
+  }
+  linhas.push('');
+  return linhas.join('\n');
+}
+
+/* de "B_0F30" de volta para 0x0F30 */
+function posicaoDoBloco(rotulo) {
+  const m = /^B_([0-9A-F]{4})$/.exec(String(rotulo || ''));
+  return m ? parseInt(m[1], 16) : -1;
+}
+
 function abrirRom(file) {
   const rd = new FileReader();
   rd.onload = () => {
@@ -2406,7 +2468,10 @@ function abrirRom(file) {
     }
     try {
       emuLoadRom(bytes, file.name, true);
-      say(file.name + ' no console — ' + bytes.length + ' bytes');
+      lastRom = { bytes, name: file.name };      // para o Salvar ROM gravar este
+      abrirComoDados(bytes, file.name);
+      say(file.name + ' no console — ' + bytes.length + ' bytes, ' +
+          Math.ceil(bytes.length / BLOCO) + ' blocos na galeria');
     } catch (err) {
       say('não consegui rodar ' + file.name + ': ' + (err.message || err), 'error');
     }
@@ -2491,6 +2556,10 @@ const BYTE_LINE = /^([A-Za-z_][A-Za-z0-9_]*)?([ \t]*)(\.?byte)\b([ \t]*)(.*)$/i;
 const LABEL_ONLY = /^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:?[ \t]*(;.*)?$/;
 
 const FILE = { name: '', lines: [], tables: [], sel: -1, filter: '', eol: '\n', saved: true };
+
+/* quando o que esta aberto e um cartucho e nao um fonte, guarda os bytes dele:
+   e neles que a edicao grava */
+let ROM_ABERTA = null;
 const EDITS = new Map();          // table index -> { rows, colors }
 
 function readByteValues(body) {
@@ -2565,7 +2634,33 @@ function parseAsm(text, name) {
 
 /* worth showing as a sprite: tall enough to be a shape, short enough to be
    one player                                                                */
-const looksGraphic = t => t.bytes.length >= 4 && t.bytes.length <= 64 && t.perLine === 1;
+/* Sprite tem cara de sprite: os bits vem em blocos, nao picados, e uma linha
+   parece com a de cima. Codigo e o contrario -- parece chuvisco. Duas medidas
+   dao conta: quantas vezes o bit troca dentro do byte, e quantos bits mudam de
+   uma linha para a outra.
+
+   Os limiares nao sao chute: com 2.6 e 3.2 as onze tabelas de sprite dos nossos
+   fontes passam todas, e a ROM cai para uns 18% dos blocos -- o bastante para
+   passar o olho. Afrouxar para 3.0 e 3.5 traz o dobro de lixo junto. */
+function pareceSprite(bytes) {
+  const n = bytes.length;
+  if (n < 4) return false;
+  const bits = v => { let c = 0; while (v) { c += v & 1; v >>= 1; } return c; };
+  let chapados = 0, trocas = 0, difLinha = 0;
+  for (let i = 0; i < n; i++) {
+    const b = bytes[i];
+    if (b === 0 || b === 0xff) chapados++;
+    trocas += bits((b ^ (b >> 1)) & 0x7f);
+    if (i) difLinha += bits(b ^ bytes[i - 1]);
+  }
+  if (chapados === n) return false;              // bloco vazio nao e desenho
+  if (chapados > n * 0.75) return false;         // quase vazio: sobra de espaco
+  return trocas / n <= 2.6 && difLinha / (n - 1) <= 3.2;
+}
+
+const looksGraphic = t =>
+  ROM_ABERTA ? pareceSprite(t.bytes)
+             : (t.bytes.length >= 4 && t.bytes.length <= 64 && t.perLine === 1);
 
 const currentBytes = i => (EDITS.get(i) || {}).rows || FILE.tables[i].bytes;
 
@@ -2788,7 +2883,28 @@ $('#copyFile').addEventListener('click', () => {
 });
 
 /* --- loading -------------------------------------------------------------- */
+/* Enche a galeria com os blocos da ROM. Reaproveita o caminho do .asm inteiro:
+   o texto gerado passa pelo mesmo parseAsm, entao miniatura, filtro, grade e
+   edicao funcionam sem nada novo. */
+function abrirComoDados(bytes, nome) {
+  ROM_ABERTA = { bytes, nome };
+  const tables = parseAsm(romComoFonte(bytes, nome), nome);
+  FILE.saved = true;
+  FILE.dirtyText = false;
+  $('#fname').textContent = nome;
+  $('#colSprites').classList.remove('shut');
+  $('#shutFile').textContent = 'Recolher';
+  ['#search', '#allWrap', '#prevT', '#nextT', '#copyFile', '#shutFile']
+    .forEach(sel => { $(sel).hidden = false; });
+  renderGallery();
+  renderColors();
+  const first = visibleTables()[0];
+  if (first) selectTable(first.i);
+  return tables;
+}
+
 function openAsm(file) {
+  ROM_ABERTA = null;
   const rd = new FileReader();
   rd.onload = () => {
     const tables = parseAsm(String(rd.result), file.name);
@@ -2858,6 +2974,23 @@ function syncFile() {
   // would put the dot back right after a save
   if (!same && isDirty(FILE.sel)) FILE.saved = false;
   if (typeof updateTitle === 'function') updateTitle();
+
+  /* Com um cartucho aberto, o desenho vai direto para os bytes dele. O emulador
+     copia a ROM ao ligar, entao a mudanca aparece no Reiniciar -- nao no meio da
+     partida, que seria trocar o chao debaixo do jogo. */
+  if (ROM_ABERTA && !same) {
+    const t = FILE.tables[FILE.sel];
+    const off = posicaoDoBloco(t && t.label);
+    if (off >= 0) {
+      for (let i = 0; i < rows.length && off + i < ROM_ABERTA.bytes.length; i++) {
+        ROM_ABERTA.bytes[off + i] = rows[i] & 0xff;
+      }
+      emuRom = ROM_ABERTA.bytes;
+      lastRom = { bytes: ROM_ABERTA.bytes, name: ROM_ABERTA.nome };
+      say('byte $' + off.toString(16).toUpperCase() + ' em diante alterado — ' +
+          'Reiniciar mostra no jogo');
+    }
+  }
 }
 
 /* ==========================================================================

@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-09-01 19:31';
+const APP_BUILD = '2026-09-01 19:45';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6419,8 +6419,13 @@ const EMU_KEYS = {
 };
 
 function emuKey(e, down) {
-  if (view !== 'emu' || !emuOn) return;
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  /* Antes o emulador era uma visao propria, e so ela ouvia o teclado. Agora ele
+     mora na terceira coluna e esta sempre a vista -- so que a checagem ficou,
+     comparando com uma visao que nao existe mais. Resultado: nenhuma tecla
+     chegava ao console, e nem o Enter do Game Reset, que e o que comeca a
+     maioria dos jogos. */
+  if (!emuOn) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable) return;
   // T, P e F ficam fora do WASD para funcionarem também em tela cheia,
   // onde o painel lateral não existe
   if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.code === 'KeyT' || e.code === 'KeyP' || e.code === 'KeyF')) {
@@ -6444,7 +6449,6 @@ window.addEventListener('keyup', e => emuKey(e, false));
 
 /* --- controles da página --------------------------------------------------- */
 $('#emuPower').addEventListener('click', () => (emuOn ? emuPowerOff() : emuPowerOn()));
-$('#emuPower').addEventListener('click', emuPowerOn);
 $('#emuReset').addEventListener('click', emuReset);
 $('#emuPause').addEventListener('click', emuPause);
 

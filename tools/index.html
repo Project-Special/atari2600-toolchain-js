@@ -1358,7 +1358,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
   <section id="colSprites">
     <h2>Sprites</h2>
 <div class="filebar-head">
-    <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt" hidden>
+    <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt,.bin,.a26,.rom,.nes" hidden>
     <input type="file" id="romFile" accept=".asm,.h,.s,.inc,.txt,.bin,.a26,.rom,.nes" hidden>
     <span class="fname" id="fname">nenhum arquivo aberto</span>
     <span class="fmeta" id="fmeta">Arquivo &#9656; Abrir .asm, ou arraste o arquivo para cá — toda tabela <code>.byte</code> vira uma miniatura clicável</span>
@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-09-01 19:16';
+const APP_BUILD = '2026-09-01 19:20';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2345,7 +2345,7 @@ window.receberArquivo = function (f) { abrirQualquer(f); };
 /* Uma porta so para qualquer arquivo. Antes a rota era pela extensao, e um
    .nes caia no leitor de .asm -- o nome nao esta na lista de cartucho, e
    pronto. Agora o arquivo e farejado: quem manda e o conteudo. */
-function abrirQualquer(f) {
+function abrirQualquer(f, handle) {
   const rd = new FileReader();
   rd.onload = () => {
     const bytes = new Uint8Array(rd.result);
@@ -2369,6 +2369,9 @@ function abrirQualquer(f) {
         parent.entregarAoConsole('nes', f);
         return;
       }
+      /* So fonte vira alvo do Ctrl+S: adotar o handle de um cartucho faria
+         o Salvar gravar a ROM por cima do .asm. */
+      if (handle) fileHandle = handle;
       openAsm(f);
       return;
     }
@@ -2806,7 +2809,10 @@ function openAsm(file) {
   rd.readAsText(file, 'latin1');
 }
 
-$('#asmFile').addEventListener('change', e => { if (e.target.files[0]) openAsm(e.target.files[0]); });
+$('#asmFile').addEventListener('change', e => {
+  if (e.target.files[0]) abrirQualquer(e.target.files[0]);
+  e.target.value = '';
+});
 $('#search').addEventListener('input', e => { FILE.filter = e.target.value; renderGallery(); });
 $('#onlyGfx').addEventListener('change', renderGallery);
 $('#shutFile').addEventListener('click', () => {
@@ -2971,14 +2977,21 @@ async function writeOut(name, blob, text, handle, adopt) {
 }
 
 /* --- file actions --------------------------------------------------------- */
+/* Abrir do menu, que precisa oferecer as mesmas coisas que o botao da barra.
+   Enquanto so oferecia fonte, um .a26 nem aparecia no dialogo -- o arquivo
+   existia, estava na pasta, e nao dava para escolher. Dentro do iframe o
+   showOpenFilePicker nem existe, entao quem responde na pratica e o input; os
+   dois precisam da mesma lista. */
 async function openAsmPicker() {
   if (CAN_FS && typeof window.showOpenFilePicker === 'function') {
     try {
       const [h] = await window.showOpenFilePicker({
-        types: [{ description: 'Fonte 6502', accept: { 'text/plain': ['.asm', '.h', '.s', '.inc', '.txt'] } }],
+        types: [
+          { description: 'Fonte 6502', accept: { 'text/plain': ['.asm', '.h', '.s', '.inc', '.txt'] } },
+          { description: 'Cartucho', accept: { 'application/octet-stream': ['.bin', '.a26', '.rom', '.nes'] } },
+        ],
       });
-      fileHandle = h;
-      openAsm(await h.getFile());
+      abrirQualquer(await h.getFile(), h);
       return;
     } catch (err) {
       if (err && err.name === 'AbortError') return;
@@ -3210,8 +3223,7 @@ const SEP = { sep: true };
 const MENUS = [
   {
     label: 'Arquivo', ak: 'A', items: [
-      { label: 'Abrir .asm…', accel: 'Ctrl+O', run: openAsmPicker },
-      { label: 'Abrir ROM (.bin)…', run: () => $('#romFile').click() },
+      { label: 'Abrir…', accel: 'Ctrl+O', run: openAsmPicker },
       { label: 'Abrir imagem…', run: () => $('#file').click() },
       SEP,
       { label: 'Aplicar sprite ao código', accel: 'Ctrl+Enter', run: () => applySprite(false), on: hasTable },

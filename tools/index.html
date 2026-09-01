@@ -1290,6 +1290,11 @@ body {
 .menubar { padding: 0; background: none; border: 0; }
 .menubar > button, .menubar .mtop { padding: 5px 10px; font-size: 13px; line-height: 1.4; }
 
+/* quem esta com o teclado fica marcado: sem isso nao ha como saber se a tecla
+   vai para o jogo ou para uma caixa de texto */
+#tube { outline: none; }
+#tube:focus-visible, #tube:focus { box-shadow: 0 0 0 2px var(--line-hi); }
+
 #cartInfo { font: 12px var(--mono); color: var(--muted); margin: 8px 0 14px; }
 #cartInfo b { color: var(--text); }
 
@@ -1605,7 +1610,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
 
   <section id="colEmu">
     <h2>Emulador</h2>
-<div class="tube off" id="tube">
+<div class="tube off" id="tube" tabindex="0" title="clique aqui para o teclado ir para o jogo">
     <div class="tube-inner" id="tubeInner">
       <canvas id="emuCanvas" width="160" height="240" aria-label="tela do Atari 2600"></canvas>
     </div>
@@ -1836,7 +1841,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-09-01 19:45';
+const APP_BUILD = '2026-09-01 20:40';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -6350,6 +6355,10 @@ function emuPowerOn() {
   inner.classList.add('powering');
   setTimeout(() => inner.classList.remove('powering'), 400);
   audioStart();
+  /* Sem isto o teclado fica onde estava -- e se for o campo de filtro da coluna
+     de sprites, o jogo nasce surdo: as teclas sao ignoradas de proposito em
+     INPUT e TEXTAREA, e a pessoa fica apertando tudo sem nada acontecer. */
+  $('#tube').focus({ preventScroll: true });
   emuFpsAt = performance.now();
   emuFrames = 0;
   emuLoop();
@@ -6449,6 +6458,11 @@ window.addEventListener('keyup', e => emuKey(e, false));
 
 /* --- controles da página --------------------------------------------------- */
 $('#emuPower').addEventListener('click', () => (emuOn ? emuPowerOff() : emuPowerOn()));
+
+/* clicar na tela devolve o teclado ao jogo, venha ele de onde vier */
+$('#tube').addEventListener('pointerdown', () => {
+  if (emuOn) $('#tube').focus({ preventScroll: true });
+});
 $('#emuReset').addEventListener('click', emuReset);
 $('#emuPause').addEventListener('click', emuPause);
 

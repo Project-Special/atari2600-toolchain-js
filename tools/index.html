@@ -1359,7 +1359,7 @@ main#stage.modo-codigo #colSprites, main#stage.modo-codigo #colDesenho { display
     <h2>Sprites</h2>
 <div class="filebar-head">
     <input type="file" id="asmFile" accept=".asm,.h,.s,.inc,.txt" hidden>
-    <input type="file" id="romFile" accept=".asm,.h,.s,.inc,.txt,.bin,.a26,.rom" hidden>
+    <input type="file" id="romFile" accept=".asm,.h,.s,.inc,.txt,.bin,.a26,.rom,.nes" hidden>
     <span class="fname" id="fname">nenhum arquivo aberto</span>
     <span class="fmeta" id="fmeta">Arquivo &#9656; Abrir .asm, ou arraste o arquivo para cá — toda tabela <code>.byte</code> vira uma miniatura clicável</span>
     <span class="spacer"></span>
@@ -1836,7 +1836,7 @@ const START_HEIGHT = 16;   // an empty sprite, a common player height tall
 
 /* Carimbo desta página. F5 aqui compila, então quem recarrega é Ctrl+R —
    sem isso não dava para saber se a aba aberta é a versão nova. */
-const APP_BUILD = '2026-08-23 11:48';
+const APP_BUILD = '2026-09-01 19:16';
 
 const S = {
   rows:   new Array(START_HEIGHT).fill(0),
@@ -2339,10 +2339,60 @@ function loadImage(file) {
    codigo e nao ha como saber quais sao. Entao a ROM aberta vai direto para o
    console e o resto do editor continua no que estiver aberto.
 ------------------------------------------------------------------------------ */
+/* a casca entrega aqui o arquivo que o outro editor recebeu por engano */
+window.receberArquivo = function (f) { abrirQualquer(f); };
+
+/* Uma porta so para qualquer arquivo. Antes a rota era pela extensao, e um
+   .nes caia no leitor de .asm -- o nome nao esta na lista de cartucho, e
+   pronto. Agora o arquivo e farejado: quem manda e o conteudo. */
+function abrirQualquer(f) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const bytes = new Uint8Array(rd.result);
+    if (ehRomDeNes(bytes)) {
+      say(f.name + ' é uma ROM de NES — passei para o editor do NES', 'ok');
+      parent.entregarAoConsole('nes', f);
+      return;
+    }
+    let texto = 0;
+    const olhar = Math.min(bytes.length, 512);
+    for (let i = 0; i < olhar; i++) {
+      const c = bytes[i];
+      if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127)) texto++;
+    }
+    if (olhar && texto / olhar > 0.95) {
+      /* e fonte: so falta saber de qual console. A diretiva ines so existe
+         no de NES, e e ela que escreve o cabecalho do cartucho. */
+      const fonte = new TextDecoder().decode(bytes.subarray(0, 4096));
+      if (/^\s*ines\s/mi.test(fonte)) {
+        say(f.name + ' é um fonte de NES — passei para o editor do NES', 'ok');
+        parent.entregarAoConsole('nes', f);
+        return;
+      }
+      openAsm(f);
+      return;
+    }
+    abrirRom(f);
+  };
+  rd.onerror = () => say('não consegui ler ' + f.name, 'error');
+  rd.readAsArrayBuffer(f);
+}
+
+/* ROM de NES se reconhece pelo cabecalho, sem chute nenhum */
+function ehRomDeNes(bytes) {
+  return bytes.length >= 4 && bytes[0] === 0x4e && bytes[1] === 0x45 &&
+         bytes[2] === 0x53 && bytes[3] === 0x1a;
+}
+
 function abrirRom(file) {
   const rd = new FileReader();
   rd.onload = () => {
     const bytes = new Uint8Array(rd.result);
+    if (ehRomDeNes(bytes)) {
+      say(file.name + ' é uma ROM de NES — passei para o editor do NES', 'ok');
+      parent.entregarAoConsole('nes', file);
+      return;
+    }
     if (!bytes.length || bytes.length > 65536) {
       say('«' + file.name + '» tem ' + bytes.length + ' bytes — não parece um cartucho de 2600', 'error');
       return;
@@ -2370,7 +2420,7 @@ const EH_ROM = nome => /\.(bin|a26|rom)$/i.test(nome);
 $('#btAbrirRom').addEventListener('click', () => $('#romFile').click());
 $('#romFile').addEventListener('change', e => {
   const f = e.target.files[0];
-  if (f) (EH_ROM(f.name) ? abrirRom : openAsm)(f);
+  if (f) abrirQualquer(f);
   e.target.value = '';
 });
 
@@ -2785,8 +2835,7 @@ window.addEventListener('drop', e => {
   document.body.classList.remove('dragging');
   const f = e.dataTransfer.files[0];
   if (/^image\//.test(f.type)) loadImage(f);
-  else if (EH_ROM(f.name)) abrirRom(f);
-  else openAsm(f);
+  else abrirQualquer(f);
 });
 
 /* --- keep the open table in step with the grid ---------------------------- */
@@ -11445,6 +11494,25 @@ function ehRom(bytes) {
          bytes[2] === 0x53 && bytes[3] === 0x1a;
 }
 
+/* Cartucho de 2600 nao tem cabecalho -- e byte cru do comeco ao fim. O que da
+   para dizer e que o tamanho e um dos que existem e que nao e texto. Nao e
+   prova, mas e o suficiente para oferecer o outro editor em vez de so recusar. */
+function pareceCartuchoDeAtari(bytes) {
+  const n = bytes.length;
+  return n === 2048 || n === 4096 || n === 8192 || n === 12288 ||
+         n === 16384 || n === 32768;
+}
+
+/* fonte de 2600: fala do vcs.h ou dos registradores da TIA, e nao tem o
+   cabecalho iNES que todo fonte de NES precisa ter */
+function pareceFonteDeAtari(texto) {
+  if (/^\s*ines\s/mi.test(texto)) return false;
+  return /vcs\.h|macro\.h|\bCOLUP[01F]\b|\bWSYNC\b|\bVBLANK\b|\bTIA\b/i.test(texto);
+}
+
+/* a casca entrega aqui o arquivo que o outro editor recebeu por engano */
+window.receberArquivo = function (f) { readFile(f); };
+
 function readFile(f) {
   const r = new FileReader();
   r.onload = () => {
@@ -11466,12 +11534,24 @@ function readFile(f) {
       if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127)) texto++;
     }
     if (!olhar || texto / olhar < 0.95) {
+      if (pareceCartuchoDeAtari(bytes)) {
+        say(f.name + ' parece um cartucho de Atari 2600 (' + bytes.length +
+            ' bytes) — passei para o editor do Atari');
+        parent.entregarAoConsole('atari', f);
+        return;
+      }
       const pista = oQueE(bytes);
       say(pista ? 'este arquivo ' + pista
                 : 'não é uma ROM .nes nem um fonte de texto', true);
       return;
     }
-    $('#fonte').value = new TextDecoder().decode(bytes);
+    const fonte = new TextDecoder().decode(bytes);
+    if (pareceFonteDeAtari(fonte)) {
+      say(f.name + ' é um fonte de Atari 2600 — passei para o editor do Atari');
+      parent.entregarAoConsole('atari', f);
+      return;
+    }
+    $('#fonte').value = fonte;
     $('#fnInfo').textContent = f.name + ' · ' + bytes.length + ' bytes';
     d_aba('fonte');
     say(f.name + ' aberto para editar — clique em Montar e rodar (ou Ctrl+Enter)');
@@ -12065,7 +12145,7 @@ window.editorNes = {
 <script>
 'use strict';
 
-const CASCA_BUILD = '2026-08-22 12:13';
+const CASCA_BUILD = '2026-09-01 19:15';
 
 const CONSOLES = {
   atari: { tpl: 'src-atari', nome: 'Atari 2600',
@@ -12077,6 +12157,22 @@ const CONSOLES = {
 const app = document.getElementById('app');
 const pick = document.getElementById('pick');
 const oque = document.getElementById('oque');
+
+/* Um arquivo largado no editor errado nao e culpa de quem largou: a pagina tem
+   dois consoles e so quem abriu o arquivo sabe de qual ele e. Entao o editor que
+   reconhece o arquivo do outro chama aqui, e a casca troca de console e entrega
+   o arquivo ao que nasceu -- sem obrigar a pessoa a achar o botao e abrir de
+   novo. */
+window.entregarAoConsole = function (alvo, arquivo) {
+  if (!CONSOLES[alvo]) return;
+  const jaEsta = app.dataset.alvo === alvo;
+  escolher(alvo, true);
+  const entregar = () => {
+    try { app.contentWindow.receberArquivo(arquivo); } catch (e) { /* editor sem a porta */ }
+  };
+  if (jaEsta) entregar();
+  else app.addEventListener('load', entregar, { once: true });
+};
 
 function escolher(alvo, guardar) {
   const c = CONSOLES[alvo] || CONSOLES.atari;

@@ -191,8 +191,7 @@ dono; os desenhos, as fases e os personagens de um jogo comercial têm.
 A série `nes-nave-N` é numerada de propósito: **cada mudança vira um arquivo
 novo**, e o anterior fica intacto ao lado. Dá para abrir os dois, rodar um
 depois do outro e ver exatamente o que mudou — inclusive com `diff`, que é a
-explicação mais curta que existe. O `.nes` montado vem junto de cada um, então
-dá para só abrir e jogar.
+explicação mais curta que existe.
 
 Duas coisas seguem o último da série sozinhas: o botão *Carregar o exemplo* da
 aba Fonte (o `tools/embutir.js` repõe) e o `nes-test.js`, que roda em **todos**
@@ -211,6 +210,10 @@ O som também é medido, não só ouvido: que fique mudo parado, que o disparo f
 barulho, que o tom caia, e que os dois sons **terminem sozinhos** — som que não
 acaba é o defeito clássico de quem arma o canal e esquece o contador de
 comprimento.
+
+O repositório guarda **fonte, não binário** — nem os nossos. Os `.nes` e `.bin`
+dos exemplos saem de `node tools/build.js <fonte>`, e versionar o resultado só
+duplicaria o que já está no `.asm` ao lado.
 
 Nada de jogo de terceiros aqui: nem ROMs comerciais, nem disassembly delas. Se
 você tiver os seus, é só colocar em `Arq_asm/` — o `build.js` e o

@@ -31,7 +31,8 @@ genemedic.asm
 *.nes
 Arq_nes/
 
-# ...menos a serie de exemplos daqui, que e nossa e de dominio publico: vai
-# montada junto do fonte para dar de abrir e jogar sem montar nada.
-!Arq_nave/*.nes
-!Arq_salto/*.nes
+# Nem os nossos: o repositorio guarda fonte, nao binario. Os .nes dos exemplos
+# se refazem com `node tools/build.js <fonte>` -- versionar o resultado so
+# duplicaria o que ja esta no .asm ao lado.
+Arq_nave/*.nes
+Arq_salto/*.nes
